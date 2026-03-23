@@ -1,10 +1,11 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
-import { Card, CardHeader, CardTitle, KpiCard, Badge, Button, Alert, Spinner, EmptyState } from '@/components/ui';
-import { PublicationBarChart, CitationTrendChart, HIndexChart, DeptPieChart } from '@/components/charts';
-import { departmentColor, formatDate, sourceLabel, sourceBadgeColor } from '@/lib/utils';
+import { Card, CardHeader, CardTitle, KpiCard, Button, Alert, Spinner } from '@/components/ui';
+import { CitationTrendChart, DeptPieChart } from '@/components/charts';
+import { departmentColor, formatDate, sourceLabel } from '@/lib/utils';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -12,36 +13,31 @@ export default function DashboardPage() {
   const [sluOnly, setSluOnly] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/analytics?type=dashboard`)
+    setLoading(true);
+    fetch(`/api/analytics?type=dashboard&sluOnly=${sluOnly}`)
       .then(r => r.json())
       .then(d => { setStats(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
-
-  const alertTypeIcon: Record<string, string> = {
-    LOW_CONFIDENCE_MATCH: '⚠️',
-    DATA_QUALITY: '🔍',
-    MISSING_IMPACT_FACTOR: '📰',
-    SYNC_FAILED: '🔴',
-    NEW_PUBLICATION: '📄',
-    CITATION_INCREASE: '📈',
-    DUPLICATE_DETECTED: '🔁',
-  };
+  }, [sluOnly]);
 
   return (
     <PageLayout>
       <TopBar
         title="Dashboard"
-        subtitle="Research output overview — AHEAD & HCOR departments"
+        subtitle="Research output overview - AHEAD & HCOR departments"
         actions={
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
-              <input type="checkbox" checked={sluOnly} onChange={e => setSluOnly(e.target.checked)}
-                className="rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+              <input
+                type="checkbox"
+                checked={sluOnly}
+                onChange={e => setSluOnly(e.target.checked)}
+                className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+              />
               SLU tenure only
             </label>
             <Link href="/reports">
-              <Button variant="outline" size="sm">⬇ Export Report</Button>
+              <Button variant="outline" size="sm">Export Report</Button>
             </Link>
           </div>
         }
@@ -52,39 +48,57 @@ export default function DashboardPage() {
           <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
         ) : (
           <>
-            {/* Alerts banner */}
             {stats?.alerts?.length > 0 && (
               <div className="space-y-2">
                 {stats.alerts.slice(0, 2).map((alert: any) => (
                   <Alert key={alert.id} type={alert.alertType === 'SYNC_FAILED' ? 'error' : 'warning'} title={alert.title}>
                     <span className="text-sm">{alert.message}</span>
-                    <Link href="/admin" className="ml-2 underline text-xs font-medium">Review →</Link>
+                    <Link href="/admin" className="ml-2 underline text-xs font-medium">Review</Link>
                   </Alert>
                 ))}
               </div>
             )}
 
-            {/* KPI Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <KpiCard label="Total Publications" value={stats?.totalPublications ?? 0}
-                sub="All verified sources" color="blue" icon="📄" />
-              <KpiCard label="Total Citations" value={(stats?.totalCitations ?? 0).toLocaleString()}
-                sub="Latest snapshots" color="teal" icon="📊"
-                delta={stats?.citationsThisYear ? `${stats.citationsThisYear.toLocaleString()} this year` : undefined} />
-              <KpiCard label="Avg Citations / Article" value={stats?.avgCitationsPerArticle ?? 0}
-                sub="Department average" color="green" icon="📈" />
-              <KpiCard label="Active Researchers" value={stats?.totalResearchers ?? 0}
-                sub="AHEAD + HCOR" color="amber" icon="👥" />
+              <KpiCard
+                label="Total Publications"
+                value={stats?.totalPublications ?? 0}
+                sub={sluOnly ? 'SLU tenure-filtered output' : 'All matched publications'}
+                color="blue"
+                icon="P"
+              />
+              <KpiCard
+                label="Total Citations"
+                value={(stats?.totalCitations ?? 0).toLocaleString()}
+                sub="Latest snapshot per publication"
+                color="teal"
+                icon="C"
+                delta={stats?.citationsThisYear ? `${stats.citationsThisYear.toLocaleString()} this year` : undefined}
+              />
+              <KpiCard
+                label="Avg Citations / Article"
+                value={stats?.avgCitationsPerArticle ?? 0}
+                sub="Based on displayed publication set"
+                color="green"
+                icon="A"
+              />
+              <KpiCard
+                label="Active Researchers"
+                value={stats?.totalResearchers ?? 0}
+                sub="AHEAD + HCOR"
+                color="amber"
+                icon="R"
+              />
             </div>
 
-            {/* Dept breakdown */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-              {/* Citation trend */}
               <Card className="lg:col-span-2">
                 <CardHeader>
                   <div>
                     <CardTitle>Department Citation Trends</CardTitle>
-                    <p className="text-xs text-gray-500 mt-0.5">Annual citations — AHEAD vs HCOR</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Annual citations - AHEAD vs HCOR {sluOnly ? '(SLU tenure only)' : '(all time)'}
+                    </p>
                   </div>
                   <div className="flex gap-2">
                     <span className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -95,10 +109,9 @@ export default function DashboardPage() {
                     </span>
                   </div>
                 </CardHeader>
-                <DeptCitationChart />
+                <DeptCitationChart sluOnly={sluOnly} />
               </Card>
 
-              {/* Dept pie */}
               <Card>
                 <CardHeader>
                   <CardTitle>Publications by Dept</CardTitle>
@@ -120,40 +133,38 @@ export default function DashboardPage() {
               </Card>
             </div>
 
-            {/* Bottom row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-              {/* Top researchers */}
               <Card className="lg:col-span-2">
                 <CardHeader>
                   <div>
                     <CardTitle>Researcher Leaderboard</CardTitle>
-                    <p className="text-xs text-gray-500 mt-0.5">Ranked by h-index</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Ranked by h-index for the displayed publication set</p>
                   </div>
                   <Link href="/researchers">
-                    <Button variant="ghost" size="xs">View all →</Button>
+                    <Button variant="ghost" size="xs">View all</Button>
                   </Link>
                 </CardHeader>
                 <div className="space-y-2.5">
-                  {stats?.topResearchers?.map((r: any, i: number) => (
-                    <Link key={r.id} href={`/researchers/${r.id}`}>
+                  {stats?.topResearchers?.map((researcher: any, index: number) => (
+                    <Link key={researcher.id} href={`/researchers/${researcher.id}`}>
                       <div className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer group">
                         <span className="w-6 text-center text-sm font-bold text-gray-300 font-display">
-                          {i + 1}
+                          {index + 1}
                         </span>
                         <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
                           <span className="text-brand-700 text-xs font-bold">
-                            {r.name.split(' ').map((p: string) => p[0]).slice(0, 2).join('')}
+                            {researcher.name.split(' ').map((part: string) => part[0]).slice(0, 2).join('')}
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 group-hover:text-brand-700 truncate">{r.name}</p>
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium mt-0.5 ${departmentColor(r.department)}`}>
-                            {r.department}
+                          <p className="text-sm font-medium text-gray-900 group-hover:text-brand-700 truncate">{researcher.name}</p>
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium mt-0.5 ${departmentColor(researcher.department)}`}>
+                            {researcher.department}
                           </span>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <div className="text-sm font-bold font-display text-gray-900">h={r.hIndex}</div>
-                          <div className="text-xs text-gray-400">{r.totalCitations.toLocaleString()} cit.</div>
+                          <div className="text-sm font-bold font-display text-gray-900">h={researcher.hIndex}</div>
+                          <div className="text-xs text-gray-400">{researcher.totalCitations.toLocaleString()} cit.</div>
                         </div>
                       </div>
                     </Link>
@@ -161,11 +172,10 @@ export default function DashboardPage() {
                 </div>
               </Card>
 
-              {/* Recent sync activity */}
               <Card>
                 <CardHeader>
                   <CardTitle>Sync Activity</CardTitle>
-                  <Link href="/admin/sync"><Button variant="ghost" size="xs">Manage →</Button></Link>
+                  <Link href="/admin/sync"><Button variant="ghost" size="xs">Manage</Button></Link>
                 </CardHeader>
                 <div className="space-y-3">
                   {stats?.recentJobs?.map((job: any) => (
@@ -178,7 +188,7 @@ export default function DashboardPage() {
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-medium text-gray-700">{sourceLabel(job.source)}</p>
                         <p className="text-xs text-gray-400">
-                          {job.recordsCreated} new · {job.recordsUpdated} updated
+                          {job.recordsCreated} new / {job.recordsUpdated} updated
                         </p>
                         <p className="text-[10px] text-gray-400 mt-0.5">{formatDate(job.completedAt || job.createdAt)}</p>
                       </div>
@@ -194,15 +204,14 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {/* Alerts count */}
                 {stats?.alerts?.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <Link href="/admin">
                       <div className="flex items-center justify-between p-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer border border-amber-200">
                         <span className="text-xs font-medium text-amber-800">
-                          ⚠️ {stats.alerts.length} unresolved alert{stats.alerts.length > 1 ? 's' : ''}
+                          {stats.alerts.length} unresolved alert{stats.alerts.length > 1 ? 's' : ''}
                         </span>
-                        <span className="text-xs text-amber-600">Review →</span>
+                        <span className="text-xs text-amber-600">Review</span>
                       </div>
                     </Link>
                   </div>
@@ -216,21 +225,21 @@ export default function DashboardPage() {
   );
 }
 
-// Inner chart component that fetches its own data
-function DeptCitationChart() {
+function DeptCitationChart({ sluOnly }: { sluOnly: boolean }) {
   const [data, setData] = useState<any[]>([]);
+
   useEffect(() => {
-    fetch('/api/analytics?type=full')
+    fetch(`/api/analytics?type=full&sluOnly=${sluOnly}`)
       .then(r => r.json())
       .then(d => setData(d.citationsByYear || []));
-  }, []);
+  }, [sluOnly]);
 
   return (
     <CitationTrendChart
       data={data}
       keys={[
         { key: 'AHEAD', name: 'AHEAD', color: '#1a6fb5' },
-        { key: 'HCOR',  name: 'HCOR',  color: '#14b8a6' },
+        { key: 'HCOR', name: 'HCOR', color: '#14b8a6' },
       ]}
     />
   );

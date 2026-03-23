@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 
 const BRAND_COLORS = ['#1a6fb5', '#14b8a6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#ec4899', '#0891b2'];
 const DEPT_COLORS = { AHEAD: '#1a6fb5', HCOR: '#14b8a6' };
+const RADIAN = Math.PI / 180;
 
 const tooltipStyle = {
   contentStyle: { backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: 12, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' },
@@ -78,17 +79,60 @@ export function HIndexChart({ data }: { data: { name: string; hIndex: number; de
 
 // ── Department Comparison Donut ────────────────────────────────────────────
 export function DeptPieChart({ data }: { data: { name: string; value: number }[] }) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  const renderLabel = ({
+    cx,
+    cy,
+    midAngle,
+    outerRadius,
+    percent,
+    name,
+  }: {
+    cx: number;
+    cy: number;
+    midAngle: number;
+    outerRadius: number;
+    percent?: number;
+    name?: string;
+  }) => {
+    if (!percent || !name) return null;
+
+    const labelRadius = outerRadius + 24;
+    const x = cx + labelRadius * Math.cos(-midAngle * RADIAN);
+    const y = cy + labelRadius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={name === 'AHEAD' ? DEPT_COLORS.AHEAD : DEPT_COLORS.HCOR}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={12}
+        fontWeight={600}
+      >
+        {name} {(percent * 100).toFixed(0)}%
+      </text>
+    );
+  };
+
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ResponsiveContainer width="100%" height={260}>
       <PieChart>
-        <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={85}
+        <Pie data={data} cx="50%" cy="50%" innerRadius={54} outerRadius={74}
           paddingAngle={3} dataKey="value" nameKey="name"
-          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+          label={renderLabel}
           labelLine={false}
         >
           {data.map((_, i) => <Cell key={i} fill={i === 0 ? DEPT_COLORS.AHEAD : DEPT_COLORS.HCOR} />)}
         </Pie>
         <Tooltip {...tooltipStyle} />
+        {total === 0 && (
+          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" fill="#6b7280" fontSize={12}>
+            No data
+          </text>
+        )}
       </PieChart>
     </ResponsiveContainer>
   );
