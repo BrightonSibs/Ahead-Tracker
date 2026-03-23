@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, Badge, Button, Spinner, EmptyState, ProgressBar, KpiCard } from '@/components/ui';
 import { FilterBar } from '@/components/filters';
+import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor, confidenceBadgeColor } from '@/lib/utils';
 import type { ResearcherSummary } from '@/types';
 
@@ -25,14 +26,25 @@ function ResearchersPageContent() {
   const search = searchParams.get('search') || '';
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params = new URLSearchParams();
     if (department) params.set('department', department);
     if (search) params.set('search', search);
-    fetch(`/api/researchers?${params}`)
-      .then(r => r.json())
-      .then(d => { setResearchers(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    fetchJsonCached<ResearcherSummary[]>(`/api/researchers?${params}`)
+      .then(d => {
+        if (!cancelled) {
+          setResearchers(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [department, search]);
 
   const totalCitations = researchers.reduce((a, r) => a + r.totalCitations, 0);
@@ -51,7 +63,7 @@ function ResearchersPageContent() {
       />
       <PageContent>
         {/* Summary KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Total Faculty" value={researchers.length} color="blue" icon="👥" />
           <KpiCard label="AHEAD" value={researchers.filter(r => r.department === 'AHEAD').length} color="blue" icon="🔬" />
           <KpiCard label="HCOR" value={researchers.filter(r => r.department === 'HCOR').length} color="teal" icon="🏥" />

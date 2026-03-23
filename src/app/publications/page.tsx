@@ -1,9 +1,10 @@
 'use client';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, startTransition, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, Button, Spinner, EmptyState } from '@/components/ui';
+import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor, sourceBadgeColor, sourceLabel } from '@/lib/utils';
 import type { PublicationSummary, PaginatedResult } from '@/types';
 
@@ -46,26 +47,50 @@ function PublicationsPageContent() {
       if (!v) params.delete(k); else params.set(k, v);
     });
     params.delete('page');
-    router.push(`${pathname}?${params.toString()}`);
+    const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    startTransition(() => {
+      router.replace(nextUrl, { scroll: false });
+    });
   }, [router, pathname, searchParams]);
 
   const get = (key: string) => searchParams.get(key) || '';
 
   useEffect(() => {
-    fetch('/api/researchers')
-      .then(r => r.json())
+    let cancelled = false;
+
+    fetchJsonCached<{ id: string; canonicalName: string; department: string }[]>('/api/researchers')
       .then(res => {
-        setResearchers(res);
+        if (!cancelled) {
+          setResearchers(res);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setResearchers([]);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params = new URLSearchParams(searchParamsString);
-    fetch(`/api/publications?${params}`)
-      .then(r => r.json())
-      .then(d => { setResult(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    fetchJsonCached<PaginatedResult<PublicationSummary>>(`/api/publications?${params}`)
+      .then(d => {
+        if (!cancelled) {
+          setResult(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [searchParamsString]);
 
   const verifiedIcon: Record<string, string> = {
@@ -91,9 +116,9 @@ function PublicationsPageContent() {
       <PageContent>
         {/* Filter bar */}
         <Card className="!p-4">
-          <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
             {/* Search */}
-            <div className="relative flex-1 min-w-[220px] max-w-xs">
+            <div className="relative w-full sm:min-w-[220px] sm:flex-1 sm:max-w-xs">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
               <input value={get('keyword')} onChange={e => setParam({ keyword: e.target.value || null })}
                 placeholder="Search title, abstract, journal…"
@@ -102,45 +127,45 @@ function PublicationsPageContent() {
 
             {/* Researcher */}
             <select value={get('researcherId')} onChange={e => setParam({ researcherId: e.target.value || null })}
-              className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none min-w-[160px]">
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:min-w-[160px] sm:w-auto">
               <option value="">All Researchers</option>
               {researchers.map(r => <option key={r.id} value={r.id}>{r.canonicalName}</option>)}
             </select>
 
             {/* Department */}
             <select value={get('department')} onChange={e => setParam({ department: e.target.value || null })}
-              className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
               <option value="">All Depts</option>
               <option value="AHEAD">AHEAD</option>
               <option value="HCOR">HCOR</option>
             </select>
 
             {/* Year range */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex w-full items-center gap-1.5 sm:w-auto">
               <input type="number" value={get('yearFrom')} onChange={e => setParam({ yearFrom: e.target.value || null })}
                 placeholder="From year" min={2000} max={2030}
-                className="w-24 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none" />
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
               <span className="text-gray-400 text-sm">–</span>
               <input type="number" value={get('yearTo')} onChange={e => setParam({ yearTo: e.target.value || null })}
                 placeholder="To year" min={2000} max={2030}
-                className="w-24 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none" />
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
             </div>
 
             {/* Min IF */}
             <input type="number" value={get('minIF')} onChange={e => setParam({ minIF: e.target.value || null })}
               placeholder="Min IF" step="0.1" min="0"
-              className="w-24 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none" />
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
 
             {/* Source */}
             <select value={get('source')} onChange={e => setParam({ source: e.target.value || null })}
-              className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
               <option value="">Any Source</option>
               {SOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
 
             {/* Status */}
             <select value={get('verifiedStatus')} onChange={e => setParam({ verifiedStatus: e.target.value || null })}
-              className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
               <option value="">Any Status</option>
               {VERIFIED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
@@ -155,7 +180,7 @@ function PublicationsPageContent() {
 
             {/* Clear */}
             {Array.from(searchParams.keys()).some(k => k !== 'page') && (
-              <button onClick={() => router.push(pathname)}
+              <button onClick={() => router.replace(pathname, { scroll: false })}
                 className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 px-2 py-2 rounded hover:bg-gray-100">
                 ✕ Clear
               </button>

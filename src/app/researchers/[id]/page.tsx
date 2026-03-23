@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Badge, Button, Spinner, StatRow, Tabs, Toggle, Alert } from '@/components/ui';
 import { CitationTrendChart } from '@/components/charts';
+import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import { departmentColor, confidenceBadgeColor, confidenceLabel, sourceBadgeColor, sourceLabel, formatDate, truncate } from '@/lib/utils';
 
 export default function ResearcherProfilePage() {
@@ -18,11 +19,23 @@ export default function ResearcherProfilePage() {
   const [editForm, setEditForm] = useState<any>({});
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    fetch(`/api/researchers/${id}?sluOnly=${sluOnly}`)
-      .then(r => r.json())
-      .then(d => { setResearcher(d); setEditForm({ sluStartDate: d.sluStartDate?.split('T')[0] || '', notes: d.notes || '' }); setLoading(false); })
-      .catch(() => setLoading(false));
+    fetchJsonCached<any>(`/api/researchers/${id}?sluOnly=${sluOnly}`)
+      .then(d => {
+        if (!cancelled) {
+          setResearcher(d);
+          setEditForm({ sluStartDate: d.sluStartDate?.split('T')[0] || '', notes: d.notes || '' });
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [id, sluOnly]);
 
   async function saveEdit() {
@@ -32,11 +45,11 @@ export default function ResearcherProfilePage() {
       body: JSON.stringify(editForm),
     });
     setEditing(false);
-    // Refresh
-    fetch(`/api/researchers/${id}?sluOnly=${sluOnly}`).then(r => r.json()).then(setResearcher);
+    invalidateJsonCache(`/api/researchers/${id}`);
+    fetchJsonCached<any>(`/api/researchers/${id}?sluOnly=${sluOnly}`, { force: true }).then(setResearcher);
   }
 
-  if (loading) return <PageLayout><div className="pl-56 flex items-center justify-center h-screen"><Spinner size="lg" /></div></PageLayout>;
+  if (loading) return <PageLayout><div className="flex h-screen items-center justify-center px-4"><Spinner size="lg" /></div></PageLayout>;
   if (!researcher) return <PageLayout><PageContent><Alert type="error">Researcher not found.</Alert></PageContent></PageLayout>;
 
   const aliasTypeLabel: Record<string, string> = {

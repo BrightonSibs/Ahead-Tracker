@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Alert, Spinner, Badge } from '@/components/ui';
+import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import { useSession } from 'next-auth/react';
 import { sourceLabel, formatDate } from '@/lib/utils';
 
@@ -18,15 +19,24 @@ export default function AdminPage() {
   const isAdmin = role === 'ADMIN';
 
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
-      fetch('/api/analytics?type=dashboard').then(r => r.json()),
-      fetch('/api/admin/sync').then(r => r.json()),
+      fetchJsonCached<any>('/api/analytics?type=dashboard'),
+      fetchJsonCached<any[]>('/api/admin/sync'),
     ]).then(([dashData, syncData]) => {
-      setStats(dashData);
-      setAlerts(dashData?.alerts || []);
-      setJobs(syncData || []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+      if (!cancelled) {
+        setStats(dashData);
+        setAlerts(dashData?.alerts || []);
+        setJobs(syncData || []);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function triggerSync(source: string) {
@@ -36,7 +46,8 @@ export default function AdminPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source }),
     });
-    const data = await fetch('/api/admin/sync').then(r => r.json());
+    invalidateJsonCache('/api/admin/sync');
+    const data = await fetchJsonCached<any[]>('/api/admin/sync', { force: true });
     setJobs(data);
     setSyncing(false);
   }
@@ -63,7 +74,7 @@ export default function AdminPage() {
       <PageContent>
         {!isAdmin && <Alert type="warning">You have read-only access to admin views. Contact an administrator to make changes.</Alert>}
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {adminSections.map(s => (
             <Link key={s.href} href={s.href}>
               <div className="bg-white rounded-xl border border-gray-200 p-5 hover:border-brand-300 hover:shadow-card-md transition-all cursor-pointer group">

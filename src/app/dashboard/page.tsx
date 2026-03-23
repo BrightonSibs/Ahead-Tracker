@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, KpiCard, Button, Alert, Spinner } from '@/components/ui';
 import { CitationTrendChart, DeptPieChart } from '@/components/charts';
+import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor, formatDate, sourceLabel } from '@/lib/utils';
 
 export default function DashboardPage() {
@@ -13,11 +14,22 @@ export default function DashboardPage() {
   const [sluOnly, setSluOnly] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    fetch(`/api/analytics?type=dashboard&sluOnly=${sluOnly}`)
-      .then(r => r.json())
-      .then(d => { setStats(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    fetchJsonCached<any>(`/api/analytics?type=dashboard&sluOnly=${sluOnly}`)
+      .then(d => {
+        if (!cancelled) {
+          setStats(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [sluOnly]);
 
   return (
@@ -59,7 +71,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <KpiCard
                 label="Total Publications"
                 value={stats?.totalPublications ?? 0}
@@ -229,9 +241,21 @@ function DeptCitationChart({ sluOnly }: { sluOnly: boolean }) {
   const [data, setData] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`/api/analytics?type=full&sluOnly=${sluOnly}`)
-      .then(r => r.json())
-      .then(d => setData(d.citationsByYear || []));
+    let cancelled = false;
+
+    fetchJsonCached<any>(`/api/analytics?type=full&sluOnly=${sluOnly}`)
+      .then(d => {
+        if (!cancelled) {
+          setData(d.citationsByYear || []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setData([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [sluOnly]);
 
   return (

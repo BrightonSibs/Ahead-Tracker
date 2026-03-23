@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Alert, Spinner } from '@/components/ui';
+import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import { sourceLabel, formatDate } from '@/lib/utils';
 
 const SOURCES = ['CROSSREF', 'PUBMED', 'ORCID', 'GOOGLE_SCHOLAR'];
@@ -23,8 +24,8 @@ export default function AdminSyncPage() {
 
   async function loadPageData() {
     const [jobsData, configData] = await Promise.all([
-      fetch('/api/admin/sync').then(r => r.json()).catch(() => []),
-      fetch('/api/admin/sync/config').then(r => r.json()).catch(() => ({ sources: {} })),
+      fetchJsonCached<any[]>('/api/admin/sync', { force: true }).catch(() => []),
+      fetchJsonCached<{ sources: SourceConfig }>('/api/admin/sync/config', { force: true }).catch(() => ({ sources: {} })),
     ]);
 
     setJobs(jobsData || []);
@@ -76,6 +77,7 @@ export default function AdminSyncPage() {
       });
     }
 
+    invalidateJsonCache('/api/admin/sync');
     await loadPageData();
     setSyncing(null);
   }
@@ -94,7 +96,7 @@ export default function AdminSyncPage() {
       <PageContent>
         {message && <Alert type={message.type}>{message.text}</Alert>}
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {SOURCES.map(src => {
             const recentJob = jobs.find(job => job.source === src);
             const configured = sourceConfig[src]?.configured ?? true;

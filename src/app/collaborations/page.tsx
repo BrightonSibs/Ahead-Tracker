@@ -1,12 +1,30 @@
 'use client';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
-import { Card, CardHeader, CardTitle, Button, Spinner, Alert } from '@/components/ui';
+import { Card, CardHeader, CardTitle, Button, Spinner } from '@/components/ui';
+import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor } from '@/lib/utils';
 
-interface Node { id: string; name: string; department: string; publicationCount: number; x: number; y: number; vx: number; vy: number; r: number; }
-interface Edge { source: string; target: string; weight: number; }
+interface Node {
+  id: string;
+  name: string;
+  department: string;
+  publicationCount: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  degree: number;
+}
+
+interface Edge {
+  source: string;
+  target: string;
+  weight: number;
+}
 
 export default function CollaborationsPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -14,6 +32,9 @@ export default function CollaborationsPage() {
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   const draggingRef = useRef<Node | null>(null);
+  const dragMovedRef = useRef(false);
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const hoveredRef = useRef<Node | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<any>(null);
 
@@ -24,383 +45,556 @@ export default function CollaborationsPage() {
   const [topPairs, setTopPairs] = useState<any[]>([]);
   const [topCollaborators, setTopCollaborators] = useState<any[]>([]);
   const [allResearchers, setAllResearchers] = useState<any[]>([]);
-  const [edgeMap, setEdgeMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
 
   const buildNetwork = useCallback((researchers: any[], publications: any[]) => {
-    const em: Record<string, number> = {};
-    publications.forEach((pub: any) => {
-      const rIds = pub.matchedResearchers.map((m: any) => m.id);
-      for (let i = 0; i < rIds.length; i++) {
-        for (let j = i + 1; j < rIds.length; j++) {
-          const key = [rIds[i], rIds[j]].sort().join('|');
-          em[key] = (em[key] || 0) + 1;
+    const edgeCounts: Record<string, number> = {};
+
+    publications.forEach((publication: any) => {
+      const researcherIds = publication.matchedResearchers.map((match: any) => match.id);
+      for (let i = 0; i < researcherIds.length; i++) {
+        for (let j = i + 1; j < researcherIds.length; j++) {
+          const key = [researcherIds[i], researcherIds[j]].sort().join('|');
+          edgeCounts[key] = (edgeCounts[key] || 0) + 1;
         }
       }
     });
-    setEdgeMap(em);
 
-    const W = canvasRef.current?.offsetWidth || 800;
-    const H = canvasRef.current?.offsetHeight || 480;
+    const width = canvasRef.current?.offsetWidth || 920;
+    const height = canvasRef.current?.offsetHeight || 520;
 
-    const filteredResearchers = deptFilter ? researchers.filter(r => r.department === deptFilter) : researchers;
-    const filteredEdges = Object.entries(em)
-      .filter(([, v]) => v >= minCoauth)
-      .map(([k, v]) => { const [s, t] = k.split('|'); return { source: s, target: t, weight: v }; })
-      .filter(e => filteredResearchers.some(r => r.id === e.source) && filteredResearchers.some(r => r.id === e.target));
+    const filteredResearchers = deptFilter
+      ? researchers.filter(researcher => researcher.department === deptFilter)
+      : researchers;
 
-    nodesRef.current = filteredResearchers.map(r => ({
-      id: r.id, name: r.canonicalName, department: r.department,
-      publicationCount: r.publicationCount,
-      x: W / 2 + (Math.random() - 0.5) * 400,
-      y: H / 2 + (Math.random() - 0.5) * 300,
-      vx: 0, vy: 0,
-      r: 10 + r.publicationCount * 1.8,
-    }));
+    const filteredEdges = Object.entries(edgeCounts)
+      .filter(([, weight]) => weight >= minCoauth)
+      .map(([key, weight]) => {
+        const [source, target] = key.split('|');
+        return { source, target, weight };
+      })
+      .filter(edge =>
+        filteredResearchers.some(researcher => researcher.id === edge.source) &&
+        filteredResearchers.some(researcher => researcher.id === edge.target),
+      );
+
+    const degreeMap: Record<string, number> = {};
+    filteredEdges.forEach(edge => {
+      degreeMap[edge.source] = (degreeMap[edge.source] || 0) + 1;
+      degreeMap[edge.target] = (degreeMap[edge.target] || 0) + 1;
+    });
+
+    const maxPublications = Math.max(...filteredResearchers.map(researcher => researcher.publicationCount || 0), 1);
+    const deptCounts = {
+      AHEAD: Math.max(filteredResearchers.filter(researcher => researcher.department === 'AHEAD').length, 1),
+      HCOR: Math.max(filteredResearchers.filter(researcher => researcher.department === 'HCOR').length, 1),
+    };
+    const deptIndex = { AHEAD: 0, HCOR: 0 };
+    const sharedCenterY = height * 0.52;
+
+    nodesRef.current = filteredResearchers.map(researcher => {
+      const department = researcher.department === 'HCOR' ? 'HCOR' : 'AHEAD';
+      const index = deptIndex[department]++;
+      const angle = (index / deptCounts[department]) * Math.PI * 2;
+      const laneCenterX =
+        deptFilter === 'AHEAD' || deptFilter === 'HCOR'
+          ? width / 2
+          : department === 'AHEAD'
+            ? width * 0.36
+            : width * 0.64;
+      const orbit = 68 + (index % 5) * 18;
+      const radiusScale = Math.sqrt((researcher.publicationCount || 1) / maxPublications);
+
+      return {
+        id: researcher.id,
+        name: researcher.canonicalName,
+        department: researcher.department,
+        publicationCount: researcher.publicationCount,
+        x: laneCenterX + Math.cos(angle) * orbit + (Math.random() - 0.5) * 18,
+        y: sharedCenterY + Math.sin(angle) * orbit + (Math.random() - 0.5) * 18,
+        vx: 0,
+        vy: 0,
+        r: 15 + radiusScale * 18,
+        degree: degreeMap[researcher.id] || 0,
+      };
+    });
+
     edgesRef.current = filteredEdges;
 
-    // Top pairs
-    const pairs = Object.entries(em)
+    const pairs = Object.entries(edgeCounts)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 6)
-      .map(([k, count]) => {
-        const [aId, bId] = k.split('|');
-        const rA = researchers.find(r => r.id === aId);
-        const rB = researchers.find(r => r.id === bId);
+      .map(([key, count]) => {
+        const [aId, bId] = key.split('|');
+        const rA = researchers.find(researcher => researcher.id === aId);
+        const rB = researchers.find(researcher => researcher.id === bId);
         return { rA, rB, count };
       })
-      .filter(p => p.rA && p.rB);
+      .filter(pair => pair.rA && pair.rB);
     setTopPairs(pairs);
 
-    // Top collaborators by degree
-    const degree: Record<string, number> = {};
-    filteredEdges.forEach(e => { degree[e.source] = (degree[e.source] || 0) + 1; degree[e.target] = (degree[e.target] || 0) + 1; });
-    const tc = filteredResearchers
-      .map(r => ({ ...r, degree: degree[r.id] || 0 }))
+    const connectedResearchers = filteredResearchers
+      .map(researcher => ({ ...researcher, degree: degreeMap[researcher.id] || 0 }))
       .sort((a, b) => b.degree - a.degree)
       .slice(0, 6);
-    setTopCollaborators(tc);
-
-    startAnimation();
+    setTopCollaborators(connectedResearchers);
   }, [deptFilter, minCoauth]);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
     const params = new URLSearchParams();
     if (deptFilter) params.set('department', deptFilter);
-    fetch(`/api/researchers?${params}`)
-      .then(r => r.json())
-      .then(async (researchers) => {
+
+    fetchJsonCached<any[]>(`/api/researchers?${params}`)
+      .then(async researchers => {
+        if (cancelled) return;
         setAllResearchers(researchers);
-        // Build collaboration data from publications
-        const pubResp = await fetch('/api/publications?pageSize=200');
-        const pubData = await pubResp.json();
-        buildNetwork(researchers, pubData.data || []);
+        const publicationData = await fetchJsonCached<any>('/api/publications?pageSize=200');
+        if (cancelled) return;
+        buildNetwork(researchers, publicationData.data || []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [deptFilter, minCoauth, buildNetwork]);
 
-  function startAnimation() {
+  const startAnimation = useCallback(() => {
     cancelAnimationFrame(animRef.current);
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
     const context = ctx;
     const dpr = window.devicePixelRatio || 1;
-    const W = canvas.offsetWidth, H = canvas.offsetHeight;
-    canvas.width = W * dpr; canvas.height = H * dpr;
-    context.scale(dpr, dpr);
+    const width = canvas.offsetWidth;
+    const height = canvas.offsetHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const DEPT_COLORS: Record<string, string> = { AHEAD: '#1a6fb5', HCOR: '#14b8a6' };
+    const departmentColors: Record<string, string> = { AHEAD: '#1a6fb5', HCOR: '#14b8a6' };
 
     function tick() {
       animRef.current = requestAnimationFrame(tick);
+
       const nodes = nodesRef.current;
       const edges = edgesRef.current;
+      const hovered = hoveredRef.current;
 
-      // Forces
-      nodes.forEach(n => { n.vx *= 0.85; n.vy *= 0.85; n.vx += (W / 2 - n.x) * 0.001; n.vy += (H / 2 - n.y) * 0.001; });
+      nodes.forEach(node => {
+        if (node === draggingRef.current) {
+          node.vx = 0;
+          node.vy = 0;
+          return;
+        }
+        node.vx *= 0.9;
+        node.vy *= 0.9;
+        const targetX =
+          deptFilter === 'AHEAD' || deptFilter === 'HCOR'
+            ? width / 2
+            : node.department === 'AHEAD'
+              ? width * 0.36
+              : width * 0.64;
+        const targetY = height * 0.52;
+        node.vx += (targetX - node.x) * 0.0025;
+        node.vy += (targetY - node.y) * 0.0018;
+      });
 
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i], b = nodes[j];
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const force = Math.min(900 / (dist * dist), 8);
-          const fx = (dx / dist) * force, fy = (dy / dist) * force;
-          a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
+          const a = nodes[i];
+          const b = nodes[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+          const minDistance = a.r + b.r + 18;
+          const force = distance < minDistance ? (minDistance - distance) * 0.08 : Math.min(700 / (distance * distance), 1.8);
+          const fx = (dx / distance) * force;
+          const fy = (dy / distance) * force;
+          a.vx -= fx;
+          a.vy -= fy;
+          b.vx += fx;
+          b.vy += fy;
         }
       }
 
-      edges.forEach(e => {
-        const a = nodes.find(n => n.id === e.source), b = nodes.find(n => n.id === e.target);
-        if (!a || !b) return;
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const target = 100 + e.weight * 10;
-        const force = (dist - target) * 0.025;
-        const fx = (dx / dist) * force, fy = (dy / dist) * force;
-        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+      edges.forEach(edge => {
+        const source = nodes.find(node => node.id === edge.source);
+        const target = nodes.find(node => node.id === edge.target);
+        if (!source || !target) return;
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+        const preferredDistance = Math.max(88, 146 - edge.weight * 11);
+        const force = (distance - preferredDistance) * 0.02;
+        const fx = (dx / distance) * force;
+        const fy = (dy / distance) * force;
+        source.vx += fx;
+        source.vy += fy;
+        target.vx -= fx;
+        target.vy -= fy;
       });
 
-      nodes.forEach(n => {
-        if (n === draggingRef.current) return;
-        n.x += n.vx; n.y += n.vy;
-        n.x = Math.max(n.r, Math.min(W - n.r, n.x));
-        n.y = Math.max(n.r, Math.min(H - n.r, n.y));
+      nodes.forEach(node => {
+        if (node === draggingRef.current) return;
+        node.x += node.vx;
+        node.y += node.vy;
+        node.x = Math.max(node.r + 12, Math.min(width - node.r - 12, node.x));
+        node.y = Math.max(node.r + 12, Math.min(height - node.r - 12, node.y));
       });
 
-      // Draw
-      context.clearRect(0, 0, W, H);
+      context.clearRect(0, 0, width, height);
 
-      // Edges
-      edges.forEach(e => {
-        const a = nodes.find(n => n.id === e.source), b = nodes.find(n => n.id === e.target);
-        if (!a || !b) return;
-        context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(b.x, b.y);
-        context.strokeStyle = `rgba(100,130,180,${Math.min(0.5, e.weight * 0.12)})`;
-        context.lineWidth = Math.min(e.weight * 1.2, 5);
+      if (!deptFilter) {
+        context.fillStyle = 'rgba(26,111,181,0.04)';
+        context.fillRect(28, 24, width / 2 - 42, height - 48);
+        context.fillStyle = 'rgba(20,184,166,0.04)';
+        context.fillRect(width / 2 + 14, 24, width / 2 - 42, height - 48);
+      }
+
+      edges.forEach(edge => {
+        const source = nodes.find(node => node.id === edge.source);
+        const target = nodes.find(node => node.id === edge.target);
+        if (!source || !target) return;
+        const highlighted = selectedRef.current && (selectedRef.current.id === source.id || selectedRef.current.id === target.id);
+        context.beginPath();
+        context.moveTo(source.x, source.y);
+        context.lineTo(target.x, target.y);
+        context.strokeStyle = highlighted
+          ? 'rgba(37,99,235,0.58)'
+          : `rgba(100,116,139,${Math.min(0.4, 0.18 + edge.weight * 0.07)})`;
+        context.lineWidth = highlighted ? Math.min(2.8 + edge.weight * 0.6, 5.5) : Math.min(1.4 + edge.weight * 0.6, 3.6);
         context.stroke();
-        // Weight label on thick edges
-        if (e.weight >= 2) {
-          const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-          context.fillStyle = 'rgba(100,120,160,0.8)';
-          context.font = '9px DM Sans, sans-serif';
-          context.textAlign = 'center';
-          context.fillText(String(e.weight), mx, my);
-        }
       });
 
-      // Nodes
-      nodes.forEach(n => {
-        const color = DEPT_COLORS[n.department] || '#6b7280';
-        // Shadow for selected
-        if (selectedRef.current?.id === n.id) {
-          context.shadowBlur = 16; context.shadowColor = color;
-        }
-        context.beginPath(); context.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        context.fillStyle = color + '22'; context.fill();
-        context.strokeStyle = color; context.lineWidth = 2; context.stroke();
+      nodes.forEach((node, index) => {
+        const color = departmentColors[node.department] || '#6b7280';
+        const isSelected = selectedRef.current?.id === node.id;
+        const isHovered = hovered?.id === node.id;
+        const showLabel = isSelected || isHovered || index < 4;
+
+        context.shadowBlur = isSelected ? 18 : isHovered ? 12 : 0;
+        context.shadowColor = color;
+        context.beginPath();
+        context.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+        context.fillStyle = color + (isSelected ? '30' : '18');
+        context.fill();
+        context.strokeStyle = color;
+        context.lineWidth = isSelected ? 3 : 2;
+        context.stroke();
         context.shadowBlur = 0;
 
-        // Initials
         context.fillStyle = color;
-        context.font = `bold ${Math.max(9, n.r * 0.45)}px DM Sans, sans-serif`;
-        context.textAlign = 'center'; context.textBaseline = 'middle';
-        context.fillText(n.name.split(' ').map((p: string) => p[0]).slice(0, 2).join(''), n.x, n.y);
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.font = `bold ${Math.max(10, Math.min(20, node.r * 0.46))}px DM Sans, sans-serif`;
+        context.fillText(
+          node.name
+            .split(' ')
+            .map((part: string) => part[0])
+            .slice(0, 2)
+            .join(''),
+          node.x,
+          node.y,
+        );
 
-        // Name label
-        if (n.r > 14) {
-          context.fillStyle = '#374151';
-          context.font = '10px DM Sans, sans-serif';
-          context.fillText(n.name.split(' ').slice(-1)[0], n.x, n.y + n.r + 11);
+        if (showLabel) {
+          const label = node.name.split(' ').slice(-1)[0];
+          const labelY = node.y + node.r + 15;
+          const labelWidth = Math.max(48, label.length * 7);
+          context.fillStyle = 'rgba(255,255,255,0.9)';
+          context.fillRect(node.x - labelWidth / 2, labelY - 8, labelWidth, 15);
+          context.fillStyle = '#475569';
+          context.font = '11px DM Sans, sans-serif';
+          context.fillText(label, node.x, labelY);
         }
       });
     }
+
     tick();
-  }
+  }, [deptFilter]);
+
+  useEffect(() => {
+    if (!loading) {
+      const frame = requestAnimationFrame(() => startAnimation());
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [loading, startAnimation]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onMouseMove = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
       let found: Node | null = null;
-      nodesRef.current.forEach(n => {
-        if (Math.sqrt((n.x - mx) ** 2 + (n.y - my) ** 2) < n.r + 4) found = n;
+
+      nodesRef.current.forEach(node => {
+        if (Math.sqrt((node.x - mouseX) ** 2 + (node.y - mouseY) ** 2) < node.r + 8) {
+          found = node;
+        }
       });
+
+      hoveredRef.current = found;
+
       if (tooltipRef.current) {
         if (found) {
+          const activeNode: Node = found;
           tooltipRef.current.style.display = 'block';
-          tooltipRef.current.style.left = (e.clientX + 12) + 'px';
-          tooltipRef.current.style.top = (e.clientY - 36) + 'px';
-          tooltipRef.current.innerHTML = `<strong>${(found as Node).name}</strong><br/>${(found as Node).department} · ${(found as Node).publicationCount} pubs`;
-          canvas.style.cursor = 'pointer';
+          tooltipRef.current.style.left = `${event.clientX + 12}px`;
+          tooltipRef.current.style.top = `${event.clientY - 36}px`;
+          tooltipRef.current.innerHTML = `<strong>${activeNode.name}</strong><br/>${activeNode.department} | ${activeNode.publicationCount} pubs`;
+          canvas.style.cursor = draggingRef.current ? 'grabbing' : 'pointer';
         } else {
           tooltipRef.current.style.display = 'none';
-          canvas.style.cursor = 'default';
+          canvas.style.cursor = draggingRef.current ? 'grabbing' : 'default';
         }
       }
-      if (draggingRef.current) { draggingRef.current.x = mx; draggingRef.current.y = my; }
+
+      if (draggingRef.current) {
+        if (dragOriginRef.current) {
+          const movedDistance = Math.hypot(mouseX - dragOriginRef.current.x, mouseY - dragOriginRef.current.y);
+          if (movedDistance > 6) {
+            dragMovedRef.current = true;
+          }
+        }
+        draggingRef.current.x = mouseX;
+        draggingRef.current.y = mouseY;
+        draggingRef.current.vx = 0;
+        draggingRef.current.vy = 0;
+      }
     };
-    const onMouseDown = (e: MouseEvent) => {
+
+    const onMouseDown = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-      nodesRef.current.forEach(n => { if (Math.sqrt((n.x - mx) ** 2 + (n.y - my) ** 2) < n.r + 4) draggingRef.current = n; });
-    };
-    const onMouseUp = () => { draggingRef.current = null; };
-    const onClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-      nodesRef.current.forEach(n => {
-        if (Math.sqrt((n.x - mx) ** 2 + (n.y - my) ** 2) < n.r + 4) {
-          setSelected(allResearchers.find(r => r.id === n.id) || null);
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      dragMovedRef.current = false;
+      dragOriginRef.current = { x: mouseX, y: mouseY };
+      nodesRef.current.forEach(node => {
+        if (Math.sqrt((node.x - mouseX) ** 2 + (node.y - mouseY) ** 2) < node.r + 8) {
+          draggingRef.current = node;
+          canvas.style.cursor = 'grabbing';
         }
       });
+    };
+
+    const onMouseUp = () => {
+      if (draggingRef.current && !dragMovedRef.current) {
+        setSelected(allResearchers.find(researcher => researcher.id === draggingRef.current?.id) || null);
+      }
+      draggingRef.current = null;
+      dragOriginRef.current = null;
+      canvas.style.cursor = hoveredRef.current ? 'pointer' : 'default';
     };
 
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mousedown', onMouseDown);
     canvas.addEventListener('mouseup', onMouseUp);
-    canvas.addEventListener('click', onClick);
+    canvas.addEventListener('mouseleave', onMouseUp);
+
     return () => {
       canvas.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('mousedown', onMouseDown);
       canvas.removeEventListener('mouseup', onMouseUp);
-      canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('mouseleave', onMouseUp);
       cancelAnimationFrame(animRef.current);
     };
   }, [allResearchers]);
 
   return (
     <PageLayout>
-      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph — AHEAD & HCOR" />
+      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph - AHEAD and HCOR" />
       <PageContent>
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-          {/* Network canvas */}
-          <div className="lg:col-span-3 space-y-4">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
+          <div className="space-y-4 lg:col-span-3">
             <Card className="!p-3">
-              <div className="flex flex-wrap items-center gap-3 mb-3">
-                <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
-                  className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <select
+                  value={deptFilter}
+                  onChange={event => setDeptFilter(event.target.value)}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-500"
+                >
                   <option value="">All Departments</option>
                   <option value="AHEAD">AHEAD only</option>
                   <option value="HCOR">HCOR only</option>
                 </select>
-                <select value={minCoauth} onChange={e => setMinCoauth(Number(e.target.value))}
-                  className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
+                <select
+                  value={minCoauth}
+                  onChange={event => setMinCoauth(Number(event.target.value))}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-500"
+                >
                   <option value={1}>Min 1 co-authored</option>
                   <option value={2}>Min 2 co-authored</option>
                   <option value={3}>Min 3 co-authored</option>
                 </select>
-                <div className="flex items-center gap-4 ml-auto text-xs text-gray-500">
-                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-brand-500 inline-block" /> AHEAD</span>
-                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-teal-500 inline-block" /> HCOR</span>
-                  <span>Node size = publication count · Edge weight = co-authored papers</span>
+                <div className="ml-auto flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-3 w-3 rounded-full bg-brand-500" /> AHEAD
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-3 w-3 rounded-full bg-teal-500" /> HCOR
+                  </span>
+                  <span>Hover for names, click for details</span>
                 </div>
               </div>
+
               {loading ? (
-                <div className="flex items-center justify-center h-[440px]"><Spinner size="lg" /></div>
+                <div className="flex h-[440px] items-center justify-center">
+                  <Spinner size="lg" />
+                </div>
               ) : (
-                <div className="relative rounded-xl overflow-hidden bg-gray-50 border border-gray-100" style={{ height: 480 }}>
-                  <canvas ref={canvasRef} className="w-full h-full" />
+                <div className="relative overflow-hidden rounded-xl border border-gray-100 bg-gray-50" style={{ height: 520 }}>
+                  <canvas ref={canvasRef} className="h-full w-full" />
                 </div>
               )}
             </Card>
 
-            {/* Top pairs */}
             <Card>
-              <CardHeader><CardTitle>Top Collaborating Pairs</CardTitle></CardHeader>
-              <div className="grid grid-cols-2 gap-3">
-                {topPairs.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2.5 p-3 rounded-lg bg-gray-50 border border-gray-100">
+              <CardHeader>
+                <CardTitle>Top Collaborating Pairs</CardTitle>
+              </CardHeader>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {topPairs.map((pair, index) => (
+                  <div key={index} className="flex items-center gap-2.5 rounded-lg border border-gray-100 bg-gray-50 p-3">
                     <div className="flex -space-x-2">
-                      {[p.rA, p.rB].map((r, j) => (
-                        <div key={j} className="w-8 h-8 rounded-full bg-brand-100 border-2 border-white flex items-center justify-center">
-                          <span className="text-brand-700 text-[10px] font-bold">
-                            {r.canonicalName.split(' ').map((w: string) => w[0]).slice(0, 2).join('')}
+                      {[pair.rA, pair.rB].map((researcher, pairIndex) => (
+                        <div
+                          key={pairIndex}
+                          className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-brand-100"
+                        >
+                          <span className="text-[10px] font-bold text-brand-700">
+                            {researcher.canonicalName
+                              .split(' ')
+                              .map((word: string) => word[0])
+                              .slice(0, 2)
+                              .join('')}
                           </span>
                         </div>
                       ))}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-gray-900 truncate">
-                        {p.rA.canonicalName.split(' ').slice(-1)[0]} & {p.rB.canonicalName.split(' ').slice(-1)[0]}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-gray-900">
+                        {pair.rA.canonicalName.split(' ').slice(-1)[0]} and {pair.rB.canonicalName.split(' ').slice(-1)[0]}
                       </p>
-                      <p className="text-[10px] text-gray-500 mt-0.5">{p.count} co-authored paper{p.count > 1 ? 's' : ''}</p>
+                      <p className="mt-0.5 text-[10px] text-gray-500">
+                        {pair.count} co-authored paper{pair.count > 1 ? 's' : ''}
+                      </p>
                     </div>
-                    <span className="text-lg font-bold font-display text-brand-700">{p.count}</span>
+                    <span className="font-display text-lg font-bold text-brand-700">{pair.count}</span>
                   </div>
                 ))}
               </div>
             </Card>
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-4">
-            {/* Selected researcher details */}
             {selected && (
               <Card>
                 <CardHeader>
                   <CardTitle>Selected Researcher</CardTitle>
-                  <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
+                  <button onClick={() => setSelected(null)} className="text-sm text-gray-400 hover:text-gray-600">
+                    X
+                  </button>
                 </CardHeader>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center">
-                    <span className="text-brand-700 text-sm font-bold">
-                      {selected.canonicalName.split(' ').map((p: string) => p[0]).slice(0, 2).join('')}
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100">
+                    <span className="text-sm font-bold text-brand-700">
+                      {selected.canonicalName
+                        .split(' ')
+                        .map((part: string) => part[0])
+                        .slice(0, 2)
+                        .join('')}
                     </span>
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-gray-900">{selected.canonicalName}</p>
-                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${departmentColor(selected.department)}`}>
+                    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${departmentColor(selected.department)}`}>
                       {selected.department}
                     </span>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-3">
+                <div className="mb-3 grid grid-cols-3 gap-2">
                   {[
                     { label: 'Pubs', value: selected.publicationCount },
                     { label: 'Citations', value: selected.totalCitations },
                     { label: 'h-index', value: selected.hIndex },
-                  ].map(s => (
-                    <div key={s.label} className="bg-gray-50 rounded-lg p-2 text-center">
-                      <div className="text-base font-bold font-display text-gray-900">{s.value}</div>
-                      <div className="text-[10px] text-gray-500">{s.label}</div>
+                  ].map(stat => (
+                    <div key={stat.label} className="rounded-lg bg-gray-50 p-2 text-center">
+                      <div className="font-display text-base font-bold text-gray-900">{stat.value}</div>
+                      <div className="text-[10px] text-gray-500">{stat.label}</div>
                     </div>
                   ))}
                 </div>
                 <Link href={`/researchers/${selected.id}`}>
-                  <Button variant="outline" size="sm" className="w-full">View Full Profile →</Button>
+                  <Button variant="outline" size="sm" className="w-full">View Full Profile</Button>
                 </Link>
               </Card>
             )}
 
-            {/* Most connected */}
             <Card>
-              <CardHeader><CardTitle>Most Connected</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Most Connected</CardTitle>
+              </CardHeader>
               <div className="space-y-2">
-                {topCollaborators.map((r, i) => (
-                  <div key={r.id} className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 rounded-lg p-1.5 transition-colors"
-                    onClick={() => setSelected(r)}>
-                    <span className="w-5 text-center text-xs font-bold text-gray-300">{i + 1}</span>
-                    <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
-                      <span className="text-brand-700 text-[10px] font-bold">
-                        {r.canonicalName.split(' ').map((p: string) => p[0]).slice(0, 2).join('')}
+                {topCollaborators.map((researcher, index) => (
+                  <div
+                    key={researcher.id}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-lg p-1.5 transition-colors hover:bg-gray-50"
+                    onClick={() => setSelected(researcher)}
+                  >
+                    <span className="w-5 text-center text-xs font-bold text-gray-300">{index + 1}</span>
+                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-100">
+                      <span className="text-[10px] font-bold text-brand-700">
+                        {researcher.canonicalName
+                          .split(' ')
+                          .map((part: string) => part[0])
+                          .slice(0, 2)
+                          .join('')}
                       </span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-gray-900 truncate">{r.canonicalName}</p>
-                      <p className="text-[10px] text-gray-400">{r.department}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-gray-900">{researcher.canonicalName}</p>
+                      <p className="text-[10px] text-gray-400">{researcher.department}</p>
                     </div>
-                    <span className="text-xs font-bold text-brand-700">{r.degree}</span>
+                    <span className="text-xs font-bold text-brand-700">{researcher.degree}</span>
                   </div>
                 ))}
               </div>
             </Card>
 
-            {/* Network legend */}
             <Card>
               <CardTitle className="mb-3">How to Use</CardTitle>
               <div className="space-y-2 text-xs text-gray-500">
-                <p>🖱 <strong>Drag</strong> nodes to rearrange</p>
-                <p>👆 <strong>Click</strong> a node to see details</p>
-                <p>📏 <strong>Edge thickness</strong> = collaboration strength</p>
-                <p>⭕ <strong>Node size</strong> = publication count</p>
+                <p>Drag nodes to rearrange the network.</p>
+                <p>Click a node to open the researcher summary card.</p>
+                <p>Hover a node to reveal the full name.</p>
+                <p>Thicker lines indicate stronger collaboration links.</p>
               </div>
             </Card>
           </div>
         </div>
       </PageContent>
 
-      {/* Tooltip */}
-      <div ref={tooltipRef} className="fixed z-50 pointer-events-none bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs shadow-lg" style={{ display: 'none' }} />
+      <div
+        ref={tooltipRef}
+        className="pointer-events-none fixed z-50 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-lg"
+        style={{ display: 'none' }}
+      />
     </PageLayout>
   );
 }

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Badge, Button, Spinner, Alert, StatRow } from '@/components/ui';
 import { CitationTrendChart } from '@/components/charts';
+import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import { confidenceBadgeColor, confidenceLabel, sourceBadgeColor, sourceLabel, departmentColor, formatDate } from '@/lib/utils';
 import { useSession } from 'next-auth/react';
 
@@ -19,10 +20,22 @@ export default function PublicationDetailPage() {
   const isAdmin = ['ADMIN', 'ANALYST'].includes((session?.user as any)?.role);
 
   useEffect(() => {
-    fetch(`/api/publications/${id}`)
-      .then(r => r.json())
-      .then(d => { setPub(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    let cancelled = false;
+
+    fetchJsonCached<any>(`/api/publications/${id}`)
+      .then(d => {
+        if (!cancelled) {
+          setPub(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   async function updateVerified(status: string) {
@@ -31,6 +44,7 @@ export default function PublicationDetailPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ verifiedStatus: status }),
     });
+    invalidateJsonCache(`/api/publications/${id}`);
     setPub((prev: any) => ({ ...prev, verifiedStatus: status }));
     setSaving(false);
     setMsg('Status updated.');
@@ -44,13 +58,13 @@ export default function PublicationDetailPage() {
     });
     setMsg('Researcher match excluded.');
     setSaving(false);
-    // Refresh
-    fetch(`/api/publications/${id}`).then(r => r.json()).then(setPub);
+    invalidateJsonCache(`/api/publications/${id}`);
+    fetchJsonCached<any>(`/api/publications/${id}`, { force: true }).then(setPub);
   }
 
   if (loading) return (
     <PageLayout>
-      <div className="pl-56 flex items-center justify-center h-screen"><Spinner size="lg" /></div>
+      <div className="flex h-screen items-center justify-center px-4"><Spinner size="lg" /></div>
     </PageLayout>
   );
 

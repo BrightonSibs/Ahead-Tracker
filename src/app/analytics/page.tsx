@@ -6,6 +6,7 @@ import {
   CitationTrendChart, PublicationBarChart, HIndexChart,
   SpecialtyBarChart, ImpactFactorChart, DeptPieChart,
 } from '@/components/charts';
+import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor } from '@/lib/utils';
 
 export default function AnalyticsPage() {
@@ -17,19 +18,28 @@ export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params = new URLSearchParams();
     if (dept) params.set('department', dept);
     if (sluOnly) params.set('sluOnly', 'true');
 
     Promise.all([
-      fetch(`/api/analytics?type=full&${params}`).then(r => r.json()),
-      fetch(`/api/analytics?type=dashboard`).then(r => r.json()),
+      fetchJsonCached<any>(`/api/analytics?type=full&${params}`),
+      fetchJsonCached<any>(`/api/analytics?type=dashboard&${params}`),
     ]).then(([fullData, dashData]) => {
-      setData(fullData);
-      setDashboard(dashData);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+      if (!cancelled) {
+        setData(fullData);
+        setDashboard(dashData);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [dept, sluOnly]);
 
   // Build IF distribution buckets from researcher stats
@@ -70,7 +80,7 @@ export default function AnalyticsPage() {
       />
       <PageContent>
         {/* Global KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Total Publications" value={dashboard?.totalPublications ?? '—'} color="blue" icon="📄" />
           <KpiCard label="Total Citations" value={(dashboard?.totalCitations ?? 0).toLocaleString()} color="teal" icon="📊" />
           <KpiCard label="Citations This Year" value={(dashboard?.citationsThisYear ?? 0).toLocaleString()} color="green" icon="📈" />
@@ -331,12 +341,14 @@ function ResearcherCitationChart({ researcherStats }: { researcherStats: any[] }
 
   useEffect(() => {
     if (!researcherStats.length) return;
+    let cancelled = false;
     // Fetch citation data per top researcher
     Promise.all(
       researcherStats.slice(0, 6).map(r =>
-        fetch(`/api/researchers/${r.id}`).then(res => res.json()).catch(() => null)
+        fetchJsonCached<any>(`/api/researchers/${r.id}`).catch(() => null)
       )
     ).then(details => {
+      if (cancelled) return;
       // Merge by year
       const yearMap: Record<number, Record<string, number>> = {};
       details.forEach((d, i) => {
@@ -352,6 +364,10 @@ function ResearcherCitationChart({ researcherStats }: { researcherStats: any[] }
           .map(([year, vals]) => ({ year: Number(year), ...vals }))
       );
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [researcherStats]);
 
   const keys = researcherStats.slice(0, 6).map((r, i) => ({

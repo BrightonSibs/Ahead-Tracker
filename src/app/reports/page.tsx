@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Alert, Spinner } from '@/components/ui';
+import { fetchJsonCached } from '@/lib/client-cache';
 
 export default function ReportsPage() {
   const [researchers, setResearchers] = useState<any[]>([]);
@@ -14,9 +15,22 @@ export default function ReportsPage() {
   const [yearTo, setYearTo] = useState('');
 
   useEffect(() => {
-    fetch('/api/researchers')
-      .then(r => r.json())
-      .then(d => { setResearchers(d); setLoading(false); });
+    let cancelled = false;
+
+    fetchJsonCached<any[]>('/api/researchers')
+      .then(d => {
+        if (!cancelled) {
+          setResearchers(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function buildParams() {
@@ -74,7 +88,7 @@ export default function ReportsPage() {
         {/* Filter configuration */}
         <Card>
           <CardHeader><CardTitle>Report Filters</CardTitle></CardHeader>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Researcher</label>
               <select value={selectedResearcher} onChange={e => setSelectedResearcher(e.target.value)}

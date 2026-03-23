@@ -1,7 +1,7 @@
 'use client';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { useCallback, useState } from 'react';
-import { Button, Input, Select, Toggle } from '@/components/ui';
+import { startTransition, useCallback } from 'react';
+import { Toggle } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
 export function useFilters() {
@@ -18,10 +18,17 @@ export function useFilters() {
       else params.set(k, v);
     });
     params.delete('page'); // reset pagination on filter change
-    router.push(`${pathname}?${params.toString()}`);
+    const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    startTransition(() => {
+      router.replace(nextUrl, { scroll: false });
+    });
   }, [router, pathname, searchParams]);
 
-  const reset = useCallback(() => router.push(pathname), [router, pathname]);
+  const reset = useCallback(() => {
+    startTransition(() => {
+      router.replace(pathname, { scroll: false });
+    });
+  }, [router, pathname]);
 
   return { get, set, reset, params: searchParams };
 }
