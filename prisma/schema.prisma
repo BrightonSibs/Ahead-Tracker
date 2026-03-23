@@ -1,0 +1,363 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── AUTH ─────────────────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  role          String    @default("VIEWER")
+  accounts      Account[]
+  sessions      Session[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── RESEARCHERS ──────────────────────────────────────────────────────────
+
+model Researcher {
+  id             String   @id @default(cuid())
+  facultyId      Int      @unique
+  canonicalName  String
+  department     String
+  orcid          String?  @unique
+  sluStartDate   DateTime?
+  activeStatus   Boolean  @default(true)
+  notes          String?
+  email          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  aliases        ResearcherAlias[]
+  identifiers    ResearcherIdentifier[]
+  matches        PublicationResearcherMatch[]
+  specialties    ResearcherSpecialty[]
+  auditLogs      AuditLog[]
+
+  @@index([department])
+  @@index([canonicalName])
+}
+
+model ResearcherAlias {
+  id           String   @id @default(cuid())
+  researcherId String
+  aliasName    String
+  aliasType    String    @default("NAME_VARIANT")
+  confidence   Float    @default(1.0)
+  source       String?
+  createdAt    DateTime @default(now())
+
+  researcher   Researcher @relation(fields: [researcherId], references: [id], onDelete: Cascade)
+
+  @@index([aliasName])
+  @@index([researcherId])
+}
+
+model ResearcherIdentifier {
+  id             String         @id @default(cuid())
+  researcherId   String
+  identifierType String
+  value          String
+  verified       Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+
+  researcher     Researcher @relation(fields: [researcherId], references: [id], onDelete: Cascade)
+
+  @@unique([identifierType, value])
+}
+
+// ─── PUBLICATIONS ─────────────────────────────────────────────────────────
+
+model Publication {
+  id               String    @id @default(cuid())
+  title            String
+  normalizedTitle  String?
+  doi              String?   @unique
+  pubmedId         String?   @unique
+  publicationDate  DateTime?
+  publicationYear  Int?
+  journalName      String?
+  abstract         String?
+  volume           String?
+  issue            String?
+  pages            String?
+  sourcePrimary    String         @default("MANUAL")
+  verifiedStatus   String         @default("UNVERIFIED")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  authors          PublicationAuthor[]
+  matches          PublicationResearcherMatch[]
+  citations        Citation[]
+  specialties      PublicationSpecialty[]
+  sourceRecords    SourceRecord[]
+  overrides        ManualOverride[]
+  auditLogs        AuditLog[]
+
+  @@index([publicationYear])
+  @@index([journalName])
+  @@index([doi])
+}
+
+model PublicationAuthor {
+  id            String  @id @default(cuid())
+  publicationId String
+  authorName    String
+  authorOrder   Int
+  isCorresponding Boolean @default(false)
+
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@index([publicationId])
+  @@index([authorName])
+}
+
+model PublicationResearcherMatch {
+  id                String      @id @default(cuid())
+  publicationId     String
+  researcherId      String
+  matchType         String      @default("EXACT_NAME_MATCH")
+  matchConfidence   Float       @default(0.5)
+  manuallyConfirmed Boolean     @default(false)
+  manuallyExcluded  Boolean     @default(false)
+  exclusionReason   String?
+  includedInSluOutput Boolean   @default(true)
+  sluTenureNote     String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  publication       Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  researcher        Researcher  @relation(fields: [researcherId], references: [id], onDelete: Cascade)
+
+  @@unique([publicationId, researcherId])
+  @@index([researcherId])
+  @@index([matchConfidence])
+}
+
+// ─── CITATIONS ────────────────────────────────────────────────────────────
+
+model Citation {
+  id            String     @id @default(cuid())
+  publicationId String
+  source        String
+  citationCount Int
+  capturedAt    DateTime   @default(now())
+
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@index([publicationId])
+  @@index([capturedAt])
+}
+
+// ─── JOURNALS ─────────────────────────────────────────────────────────────
+
+model JournalMetric {
+  id           String   @id @default(cuid())
+  journalName  String
+  issn         String?
+  year         Int
+  impactFactor Float?
+  hIndex       Int?
+  quartile     String?
+  source       String   @default("manual")
+  createdAt    DateTime @default(now())
+
+  @@unique([journalName, year])
+  @@index([journalName])
+  @@index([issn])
+}
+
+// ─── SPECIALTIES ──────────────────────────────────────────────────────────
+
+model Specialty {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  color       String?
+
+  publications PublicationSpecialty[]
+  researchers  ResearcherSpecialty[]
+}
+
+model PublicationSpecialty {
+  id                 String   @id @default(cuid())
+  publicationId      String
+  specialtyId        String
+  inferred           Boolean  @default(false)
+  inferenceSource    String?
+  inferenceConfidence Float?
+  manuallyOverridden Boolean  @default(false)
+
+  publication        Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  specialty          Specialty   @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@unique([publicationId, specialtyId])
+}
+
+model ResearcherSpecialty {
+  id           String     @id @default(cuid())
+  researcherId String
+  specialtyId  String
+
+  researcher   Researcher @relation(fields: [researcherId], references: [id], onDelete: Cascade)
+  specialty    Specialty  @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@unique([researcherId, specialtyId])
+}
+
+// ─── DATA SOURCES ─────────────────────────────────────────────────────────
+
+model SourceRecord {
+  id            String     @id @default(cuid())
+  publicationId String?
+  source        String
+  externalId    String?
+  rawData       String
+  normalizedAt  DateTime?
+  createdAt     DateTime   @default(now())
+
+  publication   Publication? @relation(fields: [publicationId], references: [id])
+
+  @@index([source])
+  @@index([publicationId])
+}
+
+// ─── SYNC JOBS ────────────────────────────────────────────────────────────
+
+model SyncJob {
+  id             String      @id @default(cuid())
+  source         String
+  status         String      @default("PENDING")
+  researcherId   String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  recordsFound   Int?
+  recordsCreated Int?
+  recordsUpdated Int?
+  errorMessage   String?
+  logs           String?
+  triggeredBy    String?
+  createdAt      DateTime    @default(now())
+
+  @@index([status])
+  @@index([source])
+}
+
+// ─── ADMIN / GOVERNANCE ───────────────────────────────────────────────────
+
+model ManualOverride {
+  id            String       @id @default(cuid())
+  publicationId String
+  overrideType  String
+  previousValue String?
+  newValue      String?
+  reason        String?
+  userId        String?
+  createdAt     DateTime     @default(now())
+
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  entityType   String
+  entityId     String
+  action       String
+  previousData String?
+  newData      String?
+  userId       String?
+  researcherId String?
+  publicationId String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  user         User?       @relation(fields: [userId], references: [id])
+  researcher   Researcher? @relation(fields: [researcherId], references: [id])
+  publication  Publication? @relation(fields: [publicationId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Alert {
+  id          String      @id @default(cuid())
+  alertType   String
+  title       String
+  message     String
+  entityId    String?
+  entityType  String?
+  resolved    Boolean     @default(false)
+  resolvedAt  DateTime?
+  createdAt   DateTime    @default(now())
+}
+
+model SavedFilter {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  userId      String
+  filterData  String
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ReportExport {
+  id          String       @id @default(cuid())
+  reportType  String
+  format      String
+  filters     String?
+  status      String       @default("pending")
+  fileUrl     String?
+  userId      String?
+  createdAt   DateTime     @default(now())
+}
