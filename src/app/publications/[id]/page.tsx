@@ -1,31 +1,95 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
-import { Card, CardHeader, CardTitle, Badge, Button, Spinner, Alert, StatRow } from '@/components/ui';
+import { Card, CardHeader, CardTitle, Button, Spinner, Alert, StatRow } from '@/components/ui';
 import { CitationTrendChart } from '@/components/charts';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
-import { confidenceBadgeColor, confidenceLabel, sourceBadgeColor, sourceLabel, departmentColor, formatDate } from '@/lib/utils';
-import { useSession } from 'next-auth/react';
+import {
+  confidenceBadgeColor,
+  confidenceLabel,
+  sourceBadgeColor,
+  sourceLabel,
+  departmentColor,
+  formatDate,
+} from '@/lib/utils';
+
+type ResearcherOption = {
+  id: string;
+  canonicalName: string;
+  department: string;
+};
 
 export default function PublicationDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = params.id;
+  const router = useRouter();
   const { data: session } = useSession();
+  const id = params.id;
+
   const [pub, setPub] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
-  const isAdmin = ['ADMIN', 'ANALYST'].includes((session?.user as any)?.role);
+  const [error, setError] = useState('');
+  const [researchers, setResearchers] = useState<ResearcherOption[]>([]);
+  const [selectedResearcherId, setSelectedResearcherId] = useState('');
+  const [editForm, setEditForm] = useState({
+    title: '',
+    doi: '',
+    journalName: '',
+    publicationDate: '',
+    publicationYear: '',
+    abstract: '',
+  });
+
+  const role = (session?.user as any)?.role;
+  const canEdit = ['ADMIN', 'ANALYST'].includes(role);
+  const canDelete = role === 'ADMIN';
+
+  function syncEditForm(data: any) {
+    setEditForm({
+      title: data?.title || '',
+      doi: data?.doi || '',
+      journalName: data?.journalName || '',
+      publicationDate: data?.publicationDate?.split('T')[0] || '',
+      publicationYear: data?.publicationYear ? String(data.publicationYear) : '',
+      abstract: data?.abstract || '',
+    });
+  }
+
+  async function refreshPublication() {
+    invalidateJsonCache(`/api/publications/${id}`);
+    const data = await fetchJsonCached<any>(`/api/publications/${id}`, { force: true });
+    setPub(data);
+    syncEditForm(data);
+  }
+
+  async function sendPublicationRequest(method: 'PATCH' | 'DELETE', body?: Record<string, unknown>) {
+    const response = await fetch(`/api/publications/${id}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Unable to update publication');
+    }
+
+    return payload;
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     fetchJsonCached<any>(`/api/publications/${id}`)
-      .then(d => {
+      .then(data => {
         if (!cancelled) {
-          setPub(d);
+          setPub(data);
+          syncEditForm(data);
           setLoading(false);
         }
       })
@@ -38,54 +102,150 @@ export default function PublicationDetailPage() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (!canEdit) return;
+
+    let cancelled = false;
+
+    fetchJsonCached<ResearcherOption[]>('/api/researchers')
+      .then(data => {
+        if (!cancelled) setResearchers(data);
+      })
+      .catch(() => {
+        if (!cancelled) setResearchers([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canEdit]);
+
+  async function runUpdate(
+    operation: () => Promise<void>,
+    successMessage: string,
+    fallbackError: string,
+  ) {
+    try {
+      setSaving(true);
+      setError('');
+      setMsg('');
+      await operation();
+      await refreshPublication();
+      setMsg(successMessage);
+    } catch (e: any) {
+      setError(e.message || fallbackError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function updateVerified(status: string) {
-    setSaving(true);
-    await fetch(`/api/publications/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ verifiedStatus: status }),
-    });
-    invalidateJsonCache(`/api/publications/${id}`);
-    setPub((prev: any) => ({ ...prev, verifiedStatus: status }));
-    setSaving(false);
-    setMsg('Status updated.');
+    await runUpdate(
+      () => sendPublicationRequest('PATCH', { verifiedStatus: status }).then(() => undefined),
+      'Status updated.',
+      'Unable to update status.',
+    );
+  }
+
+  async function savePublicationChanges() {
+    await runUpdate(
+      () => sendPublicationRequest('PATCH', editForm).then(() => undefined),
+      'Publication details saved.',
+      'Unable to save publication changes.',
+    );
   }
 
   async function excludeResearcher(researcherId: string, reason: string) {
-    setSaving(true);
-    await fetch(`/api/publications/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ excludeResearcherId: researcherId, exclusionReason: reason }),
-    });
-    setMsg('Researcher match excluded.');
-    setSaving(false);
-    invalidateJsonCache(`/api/publications/${id}`);
-    fetchJsonCached<any>(`/api/publications/${id}`, { force: true }).then(setPub);
+    await runUpdate(
+      () => sendPublicationRequest('PATCH', {
+        excludeResearcherId: researcherId,
+        exclusionReason: reason,
+      }).then(() => undefined),
+      'Researcher match excluded.',
+      'Unable to exclude researcher.',
+    );
   }
 
-  if (loading) return (
-    <PageLayout>
-      <div className="flex h-screen items-center justify-center px-4"><Spinner size="lg" /></div>
-    </PageLayout>
-  );
+  async function restoreResearcher(researcherId: string) {
+    await runUpdate(
+      () => sendPublicationRequest('PATCH', { restoreResearcherId: researcherId }).then(() => undefined),
+      'Researcher match restored.',
+      'Unable to restore researcher.',
+    );
+  }
 
-  if (!pub) return (
-    <PageLayout><PageContent><Alert type="error">Publication not found.</Alert></PageContent></PageLayout>
-  );
+  async function addResearcher() {
+    if (!selectedResearcherId) return;
+
+    await runUpdate(
+      async () => {
+        await sendPublicationRequest('PATCH', { addResearcherId: selectedResearcherId });
+        setSelectedResearcherId('');
+      },
+      'Researcher added to this publication.',
+      'Unable to add researcher.',
+    );
+  }
+
+  async function deletePublication() {
+    const confirmed = window.confirm(
+      'Delete this publication and all of its researcher matches, citations, and source records?',
+    );
+    if (!confirmed) return;
+
+    try {
+      setSaving(true);
+      setError('');
+      setMsg('');
+      await sendPublicationRequest('DELETE');
+      invalidateJsonCache('/api/publications');
+      invalidateJsonCache('/api/researchers');
+      router.push('/publications');
+    } catch (e: any) {
+      setSaving(false);
+      setError(e.message || 'Unable to delete publication.');
+    }
+  }
+
+  if (loading) {
+    return (
+      <PageLayout>
+        <div className="flex h-screen items-center justify-center px-4">
+          <Spinner size="lg" />
+        </div>
+      </PageLayout>
+    );
+  }
+
+  if (!pub) {
+    return (
+      <PageLayout>
+        <PageContent>
+          <Alert type="error">Publication not found.</Alert>
+        </PageContent>
+      </PageLayout>
+    );
+  }
 
   const latestCit = pub.citations?.length > 0
     ? pub.citations[pub.citations.length - 1].citationCount
     : 0;
 
-  // Build cumulative citation chart data from history
-  const chartData = pub.citationHistory?.map((c: any) => ({
-    year: new Date(c.date).getFullYear(),
-    citations: c.count,
-  })).reduce((acc: any[], cur: any) => {
-    const existing = acc.find(a => a.year === cur.year);
-    if (existing) existing.citations = Math.max(existing.citations, cur.count);
-    else acc.push({ ...cur });
-    return acc;
-  }, []).sort((a: any, b: any) => a.year - b.year) || [];
+  const matchedResearcherIds = new Set((pub.matches || []).map((match: any) => match.researcher.id));
+  const assignableResearchers = researchers.filter(researcher => !matchedResearcherIds.has(researcher.id));
+
+  const chartData = (pub.citationHistory || [])
+    .map((citation: any) => ({
+      year: new Date(citation.date).getFullYear(),
+      citations: citation.count,
+    }))
+    .reduce((acc: any[], current: any) => {
+      const existing = acc.find(entry => entry.year === current.year);
+      if (existing) existing.citations = Math.max(existing.citations, current.citations);
+      else acc.push(current);
+      return acc;
+    }, [])
+    .sort((a: any, b: any) => a.year - b.year);
 
   const statusColor: Record<string, string> = {
     VERIFIED: 'bg-green-50 text-green-700 border-green-200',
@@ -97,93 +257,105 @@ export default function PublicationDetailPage() {
   return (
     <PageLayout>
       <TopBar
-        title={pub.title?.length > 60 ? pub.title.slice(0, 60) + '…' : pub.title}
-        subtitle={`${pub.journalName || 'Unknown journal'} · ${pub.publicationYear || '—'}`}
+        title={pub.title?.length > 60 ? `${pub.title.slice(0, 60)}...` : pub.title}
+        subtitle={`${pub.journalName || 'Unknown journal'} | ${pub.publicationYear || '-'}`}
         actions={
           <div className="flex items-center gap-2">
-            <a href={`/api/export?type=publications`}>
-              <Button variant="outline" size="sm">⬇ Export</Button>
+            <a href="/api/export?type=publications">
+              <Button variant="outline" size="sm">Export</Button>
             </a>
             <Link href="/publications">
-              <Button variant="ghost" size="sm">← Back</Button>
+              <Button variant="ghost" size="sm">Back</Button>
             </Link>
           </div>
         }
       />
       <PageContent>
         {msg && <Alert type="success">{msg}</Alert>}
+        {error && <Alert type="error">{error}</Alert>}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Main content */}
-          <div className="lg:col-span-2 space-y-5">
-            {/* Metadata card */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+          <div className="space-y-5 lg:col-span-2">
             <Card>
-              <div className="flex items-start justify-between mb-4">
+              <div className="mb-4 flex items-start justify-between">
                 <div className="flex-1 pr-4">
                   <h2 className="text-base font-bold font-display text-gray-900 leading-snug">{pub.title}</h2>
-                  <p className="text-sm text-gray-500 mt-1">{pub.journalName}</p>
+                  <p className="mt-1 text-sm text-gray-500">{pub.journalName || 'Unknown journal'}</p>
                 </div>
-                <span className={`px-2 py-1 rounded-lg text-xs font-semibold border flex-shrink-0 ${statusColor[pub.verifiedStatus] || statusColor.UNVERIFIED}`}>
+                <span className={`flex-shrink-0 rounded-lg border px-2 py-1 text-xs font-semibold ${statusColor[pub.verifiedStatus] || statusColor.UNVERIFIED}`}>
                   {pub.verifiedStatus?.replace('_', ' ')}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mb-5">
+              <div className="mb-5 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
                 {[
                   { label: 'Publication Date', value: formatDate(pub.publicationDate) },
-                  { label: 'Year', value: pub.publicationYear ?? '—' },
-                  { label: 'Volume / Issue', value: [pub.volume, pub.issue].filter(Boolean).join(' / ') || '—' },
-                  { label: 'Pages', value: pub.pages || '—' },
-                  { label: 'Impact Factor', value: pub.impactFactor ? pub.impactFactor.toFixed(1) : '—' },
+                  { label: 'Year', value: pub.publicationYear ?? '-' },
+                  { label: 'Volume / Issue', value: [pub.volume, pub.issue].filter(Boolean).join(' / ') || '-' },
+                  { label: 'Pages', value: pub.pages || '-' },
+                  { label: 'Impact Factor', value: pub.impactFactor ? pub.impactFactor.toFixed(1) : '-' },
                   { label: 'Primary Source', value: sourceLabel(pub.sourcePrimary) },
                 ].map(({ label, value }) => (
                   <div key={label}>
-                    <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
-                    <p className="text-gray-800 font-medium mt-0.5">{String(value)}</p>
+                    <span className="text-xs uppercase tracking-wide text-gray-400">{label}</span>
+                    <p className="mt-0.5 font-medium text-gray-800">{String(value)}</p>
                   </div>
                 ))}
               </div>
 
-              {/* DOI & Links */}
               <div className="flex flex-wrap gap-2">
                 {pub.doi && (
-                  <a href={`https://doi.org/${pub.doi}`} target="_blank" rel="noopener"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100 transition-colors">
-                    🔗 DOI: {pub.doi}
+                  <a
+                    href={`https://doi.org/${pub.doi}`}
+                    target="_blank"
+                    rel="noopener"
+                    className="inline-flex items-center rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100"
+                  >
+                    DOI: {pub.doi}
                   </a>
                 )}
                 {pub.pubmedId && (
-                  <a href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pubmedId}`} target="_blank" rel="noopener"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors">
-                    📋 PubMed: {pub.pubmedId}
+                  <a
+                    href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pubmedId}`}
+                    target="_blank"
+                    rel="noopener"
+                    className="inline-flex items-center rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100"
+                  >
+                    PubMed: {pub.pubmedId}
                   </a>
                 )}
               </div>
 
-              {/* Abstract */}
               {pub.abstract && (
-                <div className="mt-5 pt-4 border-t border-gray-100">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Abstract</p>
-                  <p className="text-sm text-gray-700 leading-relaxed">{pub.abstract}</p>
+                <div className="mt-5 border-t border-gray-100 pt-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Abstract</p>
+                  <p className="text-sm leading-relaxed text-gray-700">{pub.abstract}</p>
                 </div>
               )}
             </Card>
 
-            {/* Authors */}
             <Card>
-              <CardHeader><CardTitle>Authors ({pub.authors?.length || 0})</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Authors ({pub.authors?.length || 0})</CardTitle>
+              </CardHeader>
               <div className="flex flex-wrap gap-2">
-                {pub.authors?.map((a: any, i: number) => (
-                  <div key={a.id} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${a.isCorresponding ? 'bg-brand-50 border border-brand-200 text-brand-800' : 'bg-gray-50 border border-gray-200 text-gray-700'}`}>
-                    <span className="text-xs text-gray-400 font-mono">{a.authorOrder}.</span>
-                    {a.authorName}
-                    {a.isCorresponding && <span className="text-[10px] text-brand-500 font-medium">✉</span>}
+                {pub.authors?.map((author: any) => (
+                  <div
+                    key={author.id}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${
+                      author.isCorresponding
+                        ? 'border border-brand-200 bg-brand-50 text-brand-800'
+                        : 'border border-gray-200 bg-gray-50 text-gray-700'
+                    }`}
+                  >
+                    <span className="font-mono text-xs text-gray-400">{author.authorOrder}.</span>
+                    {author.authorName}
+                    {author.isCorresponding && <span className="text-[10px] font-medium text-brand-500">Corresponding</span>}
                   </div>
                 ))}
               </div>
             </Card>
 
-            {/* Citation history chart */}
             <Card>
               <CardHeader>
                 <CardTitle>Citation History</CardTitle>
@@ -198,28 +370,27 @@ export default function PublicationDetailPage() {
                   keys={[{ key: 'citations', name: 'Citations', color: '#1a6fb5' }]}
                 />
               ) : (
-                <p className="text-sm text-gray-400 py-8 text-center">Insufficient citation history for trend chart.</p>
+                <p className="py-8 text-center text-sm text-gray-400">Insufficient citation history for trend chart.</p>
               )}
 
-              {/* Raw snapshots table */}
               {pub.citationHistory?.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-gray-100">
-                  <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Snapshots</p>
+                <div className="mt-4 border-t border-gray-100 pt-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Snapshots</p>
                   <div className="max-h-40 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-gray-400">
-                          <th className="text-left pb-1">Date</th>
-                          <th className="text-right pb-1">Count</th>
-                          <th className="text-right pb-1">Source</th>
+                          <th className="pb-1 text-left">Date</th>
+                          <th className="pb-1 text-right">Count</th>
+                          <th className="pb-1 text-right">Source</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {[...pub.citationHistory].reverse().slice(0, 20).map((c: any, i: number) => (
-                          <tr key={i} className="border-t border-gray-50">
-                            <td className="py-1 text-gray-500 font-mono">{c.date}</td>
-                            <td className="py-1 text-right font-bold text-brand-700">{c.count}</td>
-                            <td className="py-1 text-right text-gray-400">{sourceLabel(c.source)}</td>
+                        {[...pub.citationHistory].reverse().slice(0, 20).map((citation: any, index: number) => (
+                          <tr key={index} className="border-t border-gray-50">
+                            <td className="py-1 font-mono text-gray-500">{citation.date}</td>
+                            <td className="py-1 text-right font-bold text-brand-700">{citation.count}</td>
+                            <td className="py-1 text-right text-gray-400">{sourceLabel(citation.source)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -229,18 +400,19 @@ export default function PublicationDetailPage() {
               )}
             </Card>
 
-            {/* Audit trail */}
             {pub.overrides?.length > 0 && (
               <Card>
-                <CardHeader><CardTitle>Override / Audit Trail</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Override / Audit Trail</CardTitle>
+                </CardHeader>
                 <div className="space-y-2">
-                  {pub.overrides.map((o: any) => (
-                    <div key={o.id} className="flex items-start gap-3 p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                      <span className="text-sm">📝</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-gray-700">{o.overrideType.replace(/_/g, ' ')}</p>
-                        {o.reason && <p className="text-xs text-gray-500 mt-0.5">{o.reason}</p>}
-                        <p className="text-[10px] text-gray-400 mt-1 font-mono">{formatDate(o.createdAt)}</p>
+                  {pub.overrides.map((override: any) => (
+                    <div key={override.id} className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
+                      <span className="text-sm">Note</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-gray-700">{override.overrideType.replace(/_/g, ' ')}</p>
+                        {override.reason && <p className="mt-0.5 text-xs text-gray-500">{override.reason}</p>}
+                        <p className="mt-1 font-mono text-[10px] text-gray-400">{formatDate(override.createdAt)}</p>
                       </div>
                     </div>
                   ))}
@@ -249,118 +421,268 @@ export default function PublicationDetailPage() {
             )}
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-5">
-            {/* Summary stats */}
             <Card>
               <StatRow stats={[
                 { label: 'Citations', value: latestCit.toLocaleString(), color: 'text-brand-700' },
-                { label: 'IF', value: pub.impactFactor?.toFixed(1) ?? '—', color: 'text-green-700' },
+                { label: 'IF', value: pub.impactFactor?.toFixed(1) ?? '-', color: 'text-green-700' },
               ]} />
             </Card>
 
-            {/* Matched researchers */}
             <Card>
               <CardHeader>
                 <CardTitle>Matched Researchers</CardTitle>
                 <span className="text-xs text-gray-400">{pub.matches?.length || 0}</span>
               </CardHeader>
               <div className="space-y-3">
-                {pub.matches?.map((m: any) => (
-                  <div key={m.id} className="flex items-start gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
-                      <span className="text-brand-700 text-xs font-bold">
-                        {m.researcher.canonicalName.split(' ').map((p: string) => p[0]).slice(0, 2).join('')}
+                {pub.matches?.map((match: any) => (
+                  <div key={match.id} className="flex items-start gap-2.5">
+                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100">
+                      <span className="text-xs font-bold text-brand-700">
+                        {match.researcher.canonicalName.split(' ').map((part: string) => part[0]).slice(0, 2).join('')}
                       </span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <Link href={`/researchers/${m.researcher.id}`}>
-                        <p className="text-sm font-medium text-gray-900 hover:text-brand-700 truncate">{m.researcher.canonicalName}</p>
+                    <div className="min-w-0 flex-1">
+                      <Link href={`/researchers/${match.researcher.id}`}>
+                        <p className="truncate text-sm font-medium text-gray-900 hover:text-brand-700">
+                          {match.researcher.canonicalName}
+                        </p>
                       </Link>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${departmentColor(m.researcher.department)}`}>
-                          {m.researcher.department}
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${departmentColor(match.researcher.department)}`}>
+                          {match.researcher.department}
                         </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${confidenceBadgeColor(m.matchConfidence)}`}>
-                          {confidenceLabel(m.matchConfidence)}
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${confidenceBadgeColor(match.matchConfidence)}`}>
+                          {confidenceLabel(match.matchConfidence)}
                         </span>
-                        {m.manuallyConfirmed && <span className="text-[10px] text-green-600">✓ Confirmed</span>}
-                        {m.manuallyExcluded && <span className="text-[10px] text-red-500">✗ Excluded</span>}
+                        {match.manuallyConfirmed && <span className="text-[10px] text-green-600">Confirmed</span>}
+                        {match.manuallyExcluded && <span className="text-[10px] text-red-500">Excluded</span>}
                       </div>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{m.matchType?.replace(/_/g, ' ')}</p>
+                      <p className="mt-0.5 text-[10px] text-gray-400">{match.matchType?.replace(/_/g, ' ')}</p>
                     </div>
-                    {isAdmin && !m.manuallyExcluded && (
-                      <button
-                        onClick={() => {
-                          const reason = prompt('Reason for exclusion:');
-                          if (reason) excludeResearcher(m.researcher.id, reason);
-                        }}
-                        title="Exclude this match"
-                        className="text-gray-300 hover:text-red-500 text-xs mt-1 transition-colors"
-                      >✕</button>
+                    {canEdit && (
+                      match.manuallyExcluded ? (
+                        <button
+                          onClick={() => restoreResearcher(match.researcher.id)}
+                          title="Restore this match"
+                          className="mt-1 text-xs text-gray-300 transition-colors hover:text-green-600"
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const reason = prompt('Reason for exclusion:');
+                            if (reason) void excludeResearcher(match.researcher.id, reason);
+                          }}
+                          title="Exclude this match"
+                          className="mt-1 text-xs text-gray-300 transition-colors hover:text-red-500"
+                        >
+                          Remove
+                        </button>
+                      )
                     )}
                   </div>
                 ))}
               </div>
             </Card>
 
-            {/* Specialties */}
             <Card>
-              <CardHeader><CardTitle>Specialties</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Specialties</CardTitle>
+              </CardHeader>
               <div className="flex flex-wrap gap-1.5">
-                {pub.specialties?.map((s: any) => (
-                  <span key={s.specialtyId} className="px-2 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200">
-                    {s.specialty?.name}
+                {pub.specialties?.map((specialty: any) => (
+                  <span
+                    key={specialty.specialtyId}
+                    className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700"
+                  >
+                    {specialty.specialty?.name}
                   </span>
                 ))}
                 {!pub.specialties?.length && <p className="text-xs text-gray-400">No specialties tagged.</p>}
               </div>
             </Card>
 
-            {/* Source provenance */}
             <Card>
-              <CardHeader><CardTitle>Data Sources</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Data Sources</CardTitle>
+              </CardHeader>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500">Primary source</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${sourceBadgeColor(pub.sourcePrimary)}`}>
+                  <span className={`rounded border px-2 py-0.5 text-[10px] font-medium ${sourceBadgeColor(pub.sourcePrimary)}`}>
                     {sourceLabel(pub.sourcePrimary)}
                   </span>
                 </div>
-                {pub.sourceRecords?.map((sr: any) => (
-                  <div key={sr.id} className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-400 font-mono">{sr.externalId?.slice(0, 24)}…</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${sourceBadgeColor(sr.source)}`}>
-                      {sourceLabel(sr.source)}
+                {pub.sourceRecords?.map((record: any) => (
+                  <div key={record.id} className="flex items-center justify-between gap-3">
+                    <span className="truncate text-[10px] text-gray-400 font-mono">{record.externalId?.slice(0, 24) || 'Imported record'}</span>
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${sourceBadgeColor(record.source)}`}>
+                      {sourceLabel(record.source)}
                     </span>
                   </div>
                 ))}
               </div>
             </Card>
 
-            {/* Admin controls */}
-            {isAdmin && (
+            {canEdit && (
               <Card>
-                <CardHeader><CardTitle>Admin Controls</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Correction Tools</CardTitle>
+                </CardHeader>
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Title</label>
+                      <input
+                        value={editForm.title}
+                        onChange={e => setEditForm(prev => ({ ...prev, title: e.target.value }))}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">DOI</label>
+                      <input
+                        value={editForm.doi}
+                        onChange={e => setEditForm(prev => ({ ...prev, doi: e.target.value }))}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Journal</label>
+                      <input
+                        value={editForm.journalName}
+                        onChange={e => setEditForm(prev => ({ ...prev, journalName: e.target.value }))}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Publication Date</label>
+                        <input
+                          type="date"
+                          value={editForm.publicationDate}
+                          onChange={e => setEditForm(prev => ({ ...prev, publicationDate: e.target.value }))}
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Year</label>
+                        <input
+                          type="number"
+                          value={editForm.publicationYear}
+                          onChange={e => setEditForm(prev => ({ ...prev, publicationYear: e.target.value }))}
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Abstract</label>
+                      <textarea
+                        value={editForm.abstract}
+                        onChange={e => setEditForm(prev => ({ ...prev, abstract: e.target.value }))}
+                        rows={5}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" loading={saving} onClick={savePublicationChanges} className="flex-1">
+                        Save Changes
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => syncEditForm(pub)} className="flex-1">
+                        Reset
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-100 pt-4">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Assign Researcher</p>
+                    {assignableResearchers.length > 0 ? (
+                      <div className="space-y-2">
+                        <select
+                          value={selectedResearcherId}
+                          onChange={e => setSelectedResearcherId(e.target.value)}
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                        >
+                          <option value="">Select researcher</option>
+                          {assignableResearchers.map(researcher => (
+                            <option key={researcher.id} value={researcher.id}>
+                              {researcher.canonicalName} ({researcher.department})
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          loading={saving}
+                          disabled={!selectedResearcherId}
+                          onClick={addResearcher}
+                          className="w-full"
+                        >
+                          Add Researcher Match
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400">All researchers are already linked or previously reviewed for this publication.</p>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {canEdit && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Status Controls</CardTitle>
+                </CardHeader>
                 <div className="space-y-2">
-                  <p className="text-xs text-gray-500 mb-3">Override verification status:</p>
+                  <p className="mb-3 text-xs text-gray-500">Override verification status:</p>
                   <div className="flex flex-col gap-2">
-                    <Button variant="outline" size="sm" loading={saving}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      loading={saving}
                       onClick={() => updateVerified('VERIFIED')}
-                      className="justify-start text-green-700 border-green-200 hover:bg-green-50">
-                      ✅ Mark as Verified
+                      className="justify-start border-green-200 text-green-700 hover:bg-green-50"
+                    >
+                      Mark as Verified
                     </Button>
-                    <Button variant="outline" size="sm" loading={saving}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      loading={saving}
                       onClick={() => updateVerified('NEEDS_REVIEW')}
-                      className="justify-start text-amber-700 border-amber-200 hover:bg-amber-50">
-                      ⚠️ Flag for Review
+                      className="justify-start border-amber-200 text-amber-700 hover:bg-amber-50"
+                    >
+                      Flag for Review
                     </Button>
-                    <Button variant="outline" size="sm" loading={saving}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      loading={saving}
                       onClick={() => updateVerified('EXCLUDED')}
-                      className="justify-start text-red-600 border-red-200 hover:bg-red-50">
-                      ✗ Exclude Publication
+                      className="justify-start border-red-200 text-red-600 hover:bg-red-50"
+                    >
+                      Exclude Publication
                     </Button>
                   </div>
+                </div>
+              </Card>
+            )}
+
+            {canDelete && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Danger Zone</CardTitle>
+                </CardHeader>
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    Delete this publication if it was fetched incorrectly and should be removed entirely from the system.
+                  </p>
+                  <Button variant="danger" size="sm" loading={saving} onClick={deletePublication} className="w-full">
+                    Delete Publication
+                  </Button>
                 </div>
               </Card>
             )}
