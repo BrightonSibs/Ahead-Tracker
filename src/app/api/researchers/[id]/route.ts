@@ -4,6 +4,25 @@ import { authOptions } from '@/lib/auth';
 import { getResearcherById } from '@/lib/services/researchers';
 import { prisma } from '@/lib/prisma';
 
+function normalizeOrcid(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const normalized = String(value)
+    .trim()
+    .replace(/^https?:\/\/orcid\.org\//i, '')
+    .replace(/^orcid\.org\//i, '')
+    .toUpperCase();
+
+  if (!normalized) return null;
+
+  if (!/^\d{4}-\d{4}-\d{4}-[\dX]$/.test(normalized)) {
+    throw new Error('ORCID must be in the format 0000-0000-0000-0000');
+  }
+
+  return normalized;
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getServerSession(authOptions);
@@ -32,29 +51,86 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   try {
     const prev = await prisma.researcher.findUnique({ where: { id } });
+    if (!prev) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const updated = await prisma.researcher.update({
-      where: { id },
-      data: {
-        ...(body.canonicalName !== undefined ? { canonicalName: body.canonicalName } : {}),
-        ...(body.department !== undefined ? { department: body.department } : {}),
-        ...(body.orcid !== undefined ? { orcid: body.orcid } : {}),
-        ...(body.sluStartDate !== undefined ? { sluStartDate: body.sluStartDate ? new Date(body.sluStartDate) : null } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes } : {}),
-        ...(body.activeStatus !== undefined ? { activeStatus: body.activeStatus } : {}),
-      },
-    });
+    const normalizedOrcid = normalizeOrcid(body.orcid);
+    const updated = await prisma.$transaction(async tx => {
+      const researcher = await tx.researcher.update({
+        where: { id },
+        data: {
+          ...(body.canonicalName !== undefined ? { canonicalName: body.canonicalName } : {}),
+          ...(body.department !== undefined ? { department: body.department } : {}),
+          ...(normalizedOrcid !== undefined ? { orcid: normalizedOrcid } : {}),
+          ...(body.sluStartDate !== undefined ? { sluStartDate: body.sluStartDate ? new Date(body.sluStartDate) : null } : {}),
+          ...(body.notes !== undefined ? { notes: body.notes } : {}),
+          ...(body.activeStatus !== undefined ? { activeStatus: body.activeStatus } : {}),
+        },
+      });
 
-    await prisma.auditLog.create({
-      data: {
-        entityType: 'researcher',
-        entityId: id,
-        action: 'UPDATE',
-        previousData: prev ? JSON.stringify(prev) : null,
-        newData: JSON.stringify(body),
-        userId: (session.user as any)?.id,
-        researcherId: id,
-      },
+      if (normalizedOrcid !== undefined) {
+        await tx.researcherIdentifier.deleteMany({
+          where: {
+            researcherId: id,
+            identifierType: 'ORCID',
+            ...(normalizedOrcid ? { value: { not: normalizedOrcid } } : {}),
+          },
+        });
+
+        if (normalizedOrcid) {
+          const existingIdentifier = await tx.researcherIdentifier.findUnique({
+            where: {
+              identifierType_value: {
+                identifierType: 'ORCID',
+                value: normalizedOrcid,
+              },
+            },
+          });
+
+          if (existingIdentifier && existingIdentifier.researcherId !== id) {
+            throw new Error('That ORCID is already assigned to another researcher');
+          }
+
+          await tx.researcherIdentifier.upsert({
+            where: {
+              identifierType_value: {
+                identifierType: 'ORCID',
+                value: normalizedOrcid,
+              },
+            },
+            update: {
+              researcherId: id,
+              verified: true,
+            },
+            create: {
+              researcherId: id,
+              identifierType: 'ORCID',
+              value: normalizedOrcid,
+              verified: true,
+            },
+          });
+        } else {
+          await tx.researcherIdentifier.deleteMany({
+            where: { researcherId: id, identifierType: 'ORCID' },
+          });
+        }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          entityType: 'researcher',
+          entityId: id,
+          action: 'UPDATE',
+          previousData: JSON.stringify(prev),
+          newData: JSON.stringify({
+            ...body,
+            ...(normalizedOrcid !== undefined ? { orcid: normalizedOrcid } : {}),
+          }),
+          userId: (session.user as any)?.id,
+          researcherId: id,
+        },
+      });
+
+      return researcher;
     });
 
     return NextResponse.json(updated);

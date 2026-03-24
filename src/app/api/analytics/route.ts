@@ -1,9 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { buildObservedCitationGrowthByYear } from '@/lib/citation-metrics';
 import { getAnalyticsData } from '@/lib/services/publications';
 import { prisma } from '@/lib/prisma';
 import { calcHIndex } from '@/lib/utils';
+
+function buildCitationSummaries(
+  citations: Array<{ publicationId: string; citationCount: number; capturedAt: Date }>,
+  currentYear: number,
+) {
+  const citationsByPublication = new Map<string, Array<{ citationCount: number; capturedAt: Date }>>();
+  for (const citation of citations) {
+    const existing = citationsByPublication.get(citation.publicationId);
+    if (existing) {
+      existing.push({ citationCount: citation.citationCount, capturedAt: citation.capturedAt });
+    } else {
+      citationsByPublication.set(citation.publicationId, [
+        { citationCount: citation.citationCount, capturedAt: citation.capturedAt },
+      ]);
+    }
+  }
+
+  let totalCitations = 0;
+  let citationsThisYear = 0;
+
+  for (const publicationCitations of citationsByPublication.values()) {
+    const latestCount = publicationCitations[publicationCitations.length - 1]?.citationCount ?? 0;
+    totalCitations += latestCount;
+
+    const growthByYear = buildObservedCitationGrowthByYear(publicationCitations);
+    citationsThisYear += growthByYear[currentYear] ?? 0;
+  }
+
+  return { totalCitations, citationsThisYear };
+}
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -57,45 +88,21 @@ export async function GET(req: NextRequest) {
 
       const publicationIds = publicationMatches.map(match => match.publicationId);
       const pubCount = publicationIds.length;
+      const thisYear = new Date().getFullYear();
 
-      const latestCitations = publicationIds.length > 0
+      const citationHistory = publicationIds.length > 0
         ? await prisma.citation.findMany({
             where: { publicationId: { in: publicationIds } },
-            orderBy: { capturedAt: 'desc' },
-            select: { publicationId: true, citationCount: true },
+            orderBy: [
+              { publicationId: 'asc' },
+              { capturedAt: 'asc' },
+              { id: 'asc' },
+            ],
+            select: { publicationId: true, citationCount: true, capturedAt: true },
           })
         : [];
-
-      const latestByPub: Record<string, number> = {};
-      for (const citation of latestCitations) {
-        if (!(citation.publicationId in latestByPub)) {
-          latestByPub[citation.publicationId] = citation.citationCount;
-        }
-      }
-
-      const totalCitations = Object.values(latestByPub).reduce((a, b) => a + b, 0);
+      const { totalCitations, citationsThisYear } = buildCitationSummaries(citationHistory, thisYear);
       const avgCit = pubCount > 0 ? (totalCitations / pubCount).toFixed(1) : '0';
-
-      const thisYear = new Date().getFullYear();
-      const thisYearCitations = publicationIds.length > 0
-        ? await prisma.citation.findMany({
-            where: {
-              publicationId: { in: publicationIds },
-              capturedAt: { gte: new Date(`${thisYear}-01-01`) },
-            },
-            orderBy: { capturedAt: 'desc' },
-            select: { publicationId: true, citationCount: true },
-          })
-        : [];
-
-      const latestThisYearByPub: Record<string, number> = {};
-      for (const citation of thisYearCitations) {
-        if (!(citation.publicationId in latestThisYearByPub)) {
-          latestThisYearByPub[citation.publicationId] = citation.citationCount;
-        }
-      }
-
-      const citationsThisYear = Object.values(latestThisYearByPub).reduce((a, b) => a + b, 0);
 
       const topResearchers = researchers
         .map(researcher => {

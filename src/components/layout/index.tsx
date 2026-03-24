@@ -30,12 +30,12 @@ const NAV_DATA_PREFETCH: Record<string, string[]> = {
   '/researchers': ['/api/researchers'],
   '/publications': ['/api/researchers', '/api/publications'],
   '/analytics': ['/api/analytics?type=dashboard', '/api/analytics?type=full'],
-  '/collaborations': ['/api/researchers', '/api/publications?pageSize=200'],
+  '/collaborations': ['/api/collaborations'],
   '/reports': ['/api/researchers'],
   '/admin': ['/api/analytics?type=dashboard', '/api/admin/sync'],
   '/admin/researchers': ['/api/researchers'],
   '/admin/sync': ['/api/admin/sync', '/api/admin/sync/config'],
-  '/admin/journals': ['/api/analytics?type=journals'],
+  '/admin/journals': ['/api/journals'],
 };
 
 const SHELL_PREFETCH_ROUTES = [...NAV.map(item => item.href), ...ADMIN_NAV.map(item => item.href)];
@@ -120,19 +120,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-gray-100 px-3 py-3">
-        <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-100">
-            <span className="text-xs font-bold text-brand-700">
-              {session?.user?.name?.[0]?.toUpperCase() || 'U'}
-            </span>
-          </div>
-          <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between rounded-md px-2 py-1.5">
+          <div className="min-w-0">
             <p className="truncate text-xs font-medium text-gray-900">{session?.user?.name || 'User'}</p>
             <p className="text-[10px] capitalize text-gray-400">{(session?.user as any)?.role?.toLowerCase() || 'viewer'}</p>
           </div>
           <button
             onClick={() => signOut({ callbackUrl: '/login' })}
-            className="rounded p-1 text-sm text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            className="rounded px-2 py-1 text-sm text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
             title="Sign out"
           >
             Out

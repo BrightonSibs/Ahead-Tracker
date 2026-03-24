@@ -16,6 +16,8 @@
     "db:seed": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:migrate": "prisma migrate dev",
+    "db:dedupe-publications:check": "node scripts/dedupe-publications.js",
+    "db:dedupe-publications": "node scripts/dedupe-publications.js --apply",
     "postinstall": "prisma generate"
   },
   "dependencies": {

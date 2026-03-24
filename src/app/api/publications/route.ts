@@ -4,6 +4,10 @@ import { authOptions } from '@/lib/auth';
 import { getPublications } from '@/lib/services/publications';
 import type { FilterState } from '@/types';
 
+function normalizeTitle(value: string) {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[^a-z0-9\s]/g, '');
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -16,6 +20,8 @@ export async function GET(req: NextRequest) {
     department:      sp.get('department') || undefined,
     yearFrom:        sp.get('yearFrom') ? Number(sp.get('yearFrom')) : undefined,
     yearTo:          sp.get('yearTo') ? Number(sp.get('yearTo')) : undefined,
+    dateFrom:        sp.get('dateFrom') || undefined,
+    dateTo:          sp.get('dateTo') || undefined,
     sluOnly:         sp.get('sluOnly') === 'true',
     minImpactFactor: sp.get('minIF') ? Number(sp.get('minIF')) : undefined,
     specialty:       sp.get('specialty') || undefined,
@@ -48,6 +54,7 @@ export async function POST(req: NextRequest) {
     const pub = await prisma.publication.create({
       data: {
         title: body.title,
+        normalizedTitle: normalizeTitle(body.title),
         doi: body.doi || null,
         publicationDate: body.publicationDate ? new Date(body.publicationDate) : null,
         publicationYear: body.publicationYear ? Number(body.publicationYear) : null,

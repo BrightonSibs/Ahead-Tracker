@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Button, Input, Alert } from '@/components/ui';
@@ -7,13 +7,21 @@ import { SluShield } from '@/components/branding/slu-shield';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  if (session) { router.push('/dashboard'); return null; }
+  useEffect(() => {
+    if (session) {
+      router.replace('/dashboard');
+    }
+  }, [router, session]);
+
+  if (status === 'loading' || session) {
+    return null;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,29 +39,29 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-900 via-brand-800 to-teal-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-brand-900 via-brand-800 to-teal-900 flex items-center justify-center px-4 py-6 sm:py-8">
       {/* Background pattern */}
       <div className="absolute inset-0 opacity-5 pointer-events-none"
         style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />
 
-      <div className="w-full max-w-sm relative">
+      <div className="relative w-full max-w-sm">
         {/* Logo card */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-white/12 backdrop-blur border border-white/20 mb-4 shadow-lg p-3">
+        <div className="mb-5 text-center sm:mb-6">
+          <div className="mb-3 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-white/12 p-3 shadow-lg backdrop-blur border border-white/20 sm:mb-4 sm:h-24 sm:w-24">
             <SluShield className="w-full h-full drop-shadow-sm" />
           </div>
-          <h1 className="text-2xl font-bold font-display text-white">AHEAD Research Tracker</h1>
-          <p className="text-brand-200 text-sm mt-1">Saint Louis University</p>
+          <h1 className="text-xl font-bold font-display text-white sm:text-2xl">AHEAD Research Tracker</h1>
+          <p className="mt-1 text-sm text-brand-200">Saint Louis University</p>
         </div>
 
         {/* Login form */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">Sign in to your account</h2>
-          <p className="text-sm text-gray-500 mb-6">Use your SLU research portal credentials</p>
+        <div className="rounded-2xl bg-white p-6 shadow-2xl sm:p-8">
+          <h2 className="mb-1 text-lg font-semibold text-gray-900">Sign in to your account</h2>
+          <p className="mb-5 text-sm text-gray-500 sm:mb-6">Use your SLU research portal credentials</p>
 
           {error && <div className="mb-4"><Alert type="error">{error}</Alert></div>}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5 sm:space-y-4">
             <Input
               label="Email address"
               id="email" type="email" required autoComplete="email"
@@ -72,8 +80,8 @@ export default function LoginPage() {
           </form>
 
           {/* Demo credentials */}
-          <div className="mt-6 pt-5 border-t border-gray-100">
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">Demo credentials</p>
+          <div className="mt-5 border-t border-gray-100 pt-4 sm:mt-6 sm:pt-5">
+            <p className="mb-2.5 text-xs font-medium text-gray-400 uppercase tracking-wide sm:mb-3">Demo credentials</p>
             <div className="space-y-1.5">
               {[
                 { label: 'Admin', email: 'admin@slu.edu', pwd: 'admin123' },
@@ -82,7 +90,7 @@ export default function LoginPage() {
               ].map(c => (
                 <button key={c.label} type="button"
                   onClick={() => { setEmail(c.email); setPassword(c.pwd); }}
-                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 hover:bg-brand-50 border border-gray-200 hover:border-brand-200 transition-colors text-left group"
+                  className="group flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-left transition-colors hover:border-brand-200 hover:bg-brand-50 sm:py-2"
                 >
                   <span className="text-xs font-medium text-gray-700 group-hover:text-brand-700">{c.label}</span>
                   <span className="text-xs text-gray-400 font-mono">{c.email}</span>
@@ -92,7 +100,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-center text-brand-300 text-xs mt-6">
+        <p className="mt-4 text-center text-xs text-brand-300 sm:mt-5">
           AHEAD & HCOR Departments · Internal Use Only
         </p>
       </div>

@@ -78,6 +78,9 @@ export default function AdminSyncPage() {
     }
 
     invalidateJsonCache('/api/admin/sync');
+    invalidateJsonCache('/api/analytics');
+    invalidateJsonCache('/api/researchers');
+    invalidateJsonCache('/api/publications');
     await loadPageData();
     setSyncing(null);
   }

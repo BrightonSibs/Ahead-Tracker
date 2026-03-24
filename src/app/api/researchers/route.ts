@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getAllResearchers } from '@/lib/services/researchers';
+import { getAllResearchers, getResearchersSummary } from '@/lib/services/researchers';
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -10,8 +10,14 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const department = searchParams.get('department') || undefined;
   const search = searchParams.get('search') || undefined;
+  const summary = searchParams.get('summary') === 'true';
 
   try {
+    if (summary) {
+      const researcherSummary = await getResearchersSummary({ department, search });
+      return NextResponse.json(researcherSummary);
+    }
+
     const researchers = await getAllResearchers({ department, search });
     return NextResponse.json(researchers);
   } catch (e) {

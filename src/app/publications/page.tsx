@@ -151,6 +151,15 @@ function PublicationsPageContent() {
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
             </div>
 
+            {/* Date range */}
+            <div className="flex w-full items-center gap-1.5 sm:w-auto">
+              <input type="date" value={get('dateFrom')} onChange={e => setParam({ dateFrom: e.target.value || null })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-36" />
+              <span className="text-gray-400 text-sm">-</span>
+              <input type="date" value={get('dateTo')} onChange={e => setParam({ dateTo: e.target.value || null })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-36" />
+            </div>
+
             {/* Min IF */}
             <input type="number" value={get('minIF')} onChange={e => setParam({ minIF: e.target.value || null })}
               placeholder="Min IF" step="0.1" min="0"

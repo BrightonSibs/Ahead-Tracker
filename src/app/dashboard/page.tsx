@@ -82,10 +82,10 @@ export default function DashboardPage() {
               <KpiCard
                 label="Total Citations"
                 value={(stats?.totalCitations ?? 0).toLocaleString()}
-                sub="Latest snapshot per publication"
+                sub="Current total across all publications"
                 color="teal"
                 icon="C"
-                delta={stats?.citationsThisYear ? `${stats.citationsThisYear.toLocaleString()} this year` : undefined}
+                delta={`${(stats?.citationsThisYear ?? 0).toLocaleString()} observed growth in ${new Date().getFullYear()} so far`}
               />
               <KpiCard
                 label="Avg Citations / Article"
@@ -109,7 +109,7 @@ export default function DashboardPage() {
                   <div>
                     <CardTitle>Department Citation Trends</CardTitle>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Annual citations - AHEAD vs HCOR {sluOnly ? '(SLU tenure only)' : '(all time)'}
+                      Observed citation growth from stored snapshots - AHEAD vs HCOR {sluOnly ? '(SLU tenure only)' : '(all time)'}
                     </p>
                   </div>
                   <div className="flex gap-2">

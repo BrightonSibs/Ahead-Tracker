@@ -20,6 +20,7 @@ export default function ResearchersPage() {
 function ResearchersPageContent() {
   const searchParams = useSearchParams();
   const [researchers, setResearchers] = useState<ResearcherSummary[]>([]);
+  const [summary, setSummary] = useState<{ totalCitations: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const department = searchParams.get('department') || '';
@@ -31,10 +32,14 @@ function ResearchersPageContent() {
     const params = new URLSearchParams();
     if (department) params.set('department', department);
     if (search) params.set('search', search);
-    fetchJsonCached<ResearcherSummary[]>(`/api/researchers?${params}`)
-      .then(d => {
+    Promise.all([
+      fetchJsonCached<ResearcherSummary[]>(`/api/researchers?${params}`),
+      fetchJsonCached<{ totalCitations: number }>(`/api/researchers?summary=true&${params}`),
+    ])
+      .then(([researcherData, summaryData]) => {
         if (!cancelled) {
-          setResearchers(d);
+          setResearchers(researcherData);
+          setSummary(summaryData);
           setLoading(false);
         }
       })
@@ -47,7 +52,6 @@ function ResearchersPageContent() {
     };
   }, [department, search]);
 
-  const totalCitations = researchers.reduce((a, r) => a + r.totalCitations, 0);
   const maxH = Math.max(...researchers.map(r => r.hIndex), 0);
 
   return (
@@ -67,7 +71,7 @@ function ResearchersPageContent() {
           <KpiCard label="Total Faculty" value={researchers.length} color="blue" icon="👥" />
           <KpiCard label="AHEAD" value={researchers.filter(r => r.department === 'AHEAD').length} color="blue" icon="🔬" />
           <KpiCard label="HCOR" value={researchers.filter(r => r.department === 'HCOR').length} color="teal" icon="🏥" />
-          <KpiCard label="Total Citations" value={totalCitations.toLocaleString()} color="green" icon="📊" />
+          <KpiCard label="Total Citations" value={(summary?.totalCitations ?? 0).toLocaleString()} color="green" icon="📊" />
         </div>
 
         {/* Filters */}

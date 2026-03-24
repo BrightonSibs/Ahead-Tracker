@@ -47,6 +47,9 @@ export default function AdminPage() {
       body: JSON.stringify({ source }),
     });
     invalidateJsonCache('/api/admin/sync');
+    invalidateJsonCache('/api/analytics');
+    invalidateJsonCache('/api/researchers');
+    invalidateJsonCache('/api/publications');
     const data = await fetchJsonCached<any[]>('/api/admin/sync', { force: true });
     setJobs(data);
     setSyncing(false);

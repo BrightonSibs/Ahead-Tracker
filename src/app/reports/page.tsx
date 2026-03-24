@@ -13,6 +13,8 @@ export default function ReportsPage() {
   const [sluOnly, setSluOnly] = useState(false);
   const [yearFrom, setYearFrom] = useState('');
   const [yearTo, setYearTo] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +42,8 @@ export default function ReportsPage() {
     if (sluOnly) p.set('sluOnly', 'true');
     if (yearFrom) p.set('yearFrom', yearFrom);
     if (yearTo) p.set('yearTo', yearTo);
+    if (dateFrom) p.set('dateFrom', dateFrom);
+    if (dateTo) p.set('dateTo', dateTo);
     return p.toString();
   }
 
@@ -52,9 +56,9 @@ export default function ReportsPage() {
 
   async function generatePDF() {
     setGenerating('pdf');
-    // In a full implementation this would call a server action to generate PDF
-    // For now, trigger print dialog
-    setTimeout(() => { window.print(); setGenerating(null); }, 300);
+    const params = buildParams();
+    window.location.href = `/api/export?type=pdf&${params}`;
+    setTimeout(() => setGenerating(null), 1500);
   }
 
   const reportTypes = [
@@ -74,9 +78,9 @@ export default function ReportsPage() {
     },
     {
       id: 'pdf',
-      title: 'Print-Friendly Report',
+      title: 'PDF Report',
       icon: '🖨',
-      desc: 'Formatted report for printing or saving as PDF using your browser\'s print function.',
+      desc: 'Download a filtered PDF summary for publications and researchers.',
       action: generatePDF,
     },
   ];
@@ -118,6 +122,16 @@ export default function ReportsPage() {
                 placeholder="2024" min="2000" max="2030"
                 className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none" />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Date From</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Date To</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none" />
+            </div>
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
             <input type="checkbox" checked={sluOnly} onChange={e => setSluOnly(e.target.checked)}
@@ -149,12 +163,12 @@ export default function ReportsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Export History</CardTitle>
-            <p className="text-xs text-gray-400">Recent downloads are tracked for audit purposes</p>
+            <p className="text-xs text-gray-400">Download history placeholder</p>
           </CardHeader>
           <div className="text-center py-8 text-gray-400">
             <span className="text-3xl block mb-2">📋</span>
-            <p className="text-sm">No exports recorded yet in this session.</p>
-            <p className="text-xs mt-1">Export history is stored per-user in the database.</p>
+            <p className="text-sm">Export history is not persisted yet.</p>
+            <p className="text-xs mt-1">Downloads work normally, but this panel is informational for now.</p>
           </div>
         </Card>
 

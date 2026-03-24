@@ -42,14 +42,6 @@ export default function AnalyticsPage() {
     };
   }, [dept, sluOnly]);
 
-  // Build IF distribution buckets from researcher stats
-  const ifBuckets = [
-    { bucket: 'IF < 2', count: 0 },
-    { bucket: 'IF 2–5', count: 0 },
-    { bucket: 'IF 5–10', count: 0 },
-    { bucket: 'IF > 10', count: 0 },
-  ];
-
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'citations', label: 'Citations' },
@@ -83,7 +75,13 @@ export default function AnalyticsPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Total Publications" value={dashboard?.totalPublications ?? '—'} color="blue" icon="📄" />
           <KpiCard label="Total Citations" value={(dashboard?.totalCitations ?? 0).toLocaleString()} color="teal" icon="📊" />
-          <KpiCard label="Citations This Year" value={(dashboard?.citationsThisYear ?? 0).toLocaleString()} color="green" icon="📈" />
+          <KpiCard
+            label="Observed Citation Growth"
+            value={(dashboard?.citationsThisYear ?? 0).toLocaleString()}
+            sub={`${new Date().getFullYear()} from stored snapshots`}
+            color="green"
+            icon="📈"
+          />
           <KpiCard label="Avg Citations / Article" value={dashboard?.avgCitationsPerArticle ?? '—'} color="amber" icon="⭐" />
         </div>
 
@@ -180,8 +178,8 @@ export default function AnalyticsPage() {
                 <Card>
                   <CardHeader>
                     <div>
-                      <CardTitle>Annual Citations by Department</CardTitle>
-                      <p className="text-xs text-gray-500 mt-0.5">Total citation counts captured per year</p>
+                      <CardTitle>Observed Citation Growth by Department</CardTitle>
+                      <p className="text-xs text-gray-500 mt-0.5">Year-over-year growth inferred from stored citation snapshots</p>
                     </div>
                   </CardHeader>
                   <CitationTrendChart
@@ -196,8 +194,8 @@ export default function AnalyticsPage() {
                 <Card>
                   <CardHeader>
                     <div>
-                      <CardTitle>Per-Researcher Citation Trends</CardTitle>
-                      <p className="text-xs text-gray-500 mt-0.5">Top 6 researchers by total citations</p>
+                      <CardTitle>Per-Researcher Citation Growth</CardTitle>
+                      <p className="text-xs text-gray-500 mt-0.5">Top 6 researchers by total citations, using observed growth only</p>
                     </div>
                   </CardHeader>
                   <ResearcherCitationChart researcherStats={data?.researcherStats?.slice(0, 6) || []} />
@@ -288,6 +286,21 @@ export default function AnalyticsPage() {
                     </div>
                   </Card>
                 </div>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Specialty Citation Trends</CardTitle>
+                    <p className="text-xs text-gray-500">Observed yearly citation growth for the most-cited specialties</p>
+                  </CardHeader>
+                  <CitationTrendChart
+                    data={data?.specialtyCitationTrends || []}
+                    keys={(data?.specialtyCitationTrendKeys || []).map((item: any, index: number) => ({
+                      key: item.key,
+                      name: item.name,
+                      color: ['#14b8a6', '#1a6fb5', '#16a34a', '#d97706', '#dc2626'][index % 5],
+                    }))}
+                  />
+                </Card>
               </div>
             )}
 
@@ -305,8 +318,11 @@ export default function AnalyticsPage() {
                         <span className="w-36 text-xs text-gray-700 text-right truncate">{r.name.split(' ').slice(-1)[0]}</span>
                         <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
                           <div className="h-full rounded-full bg-brand-400 transition-all"
-                            style={{ width: `${Math.min(100, (r.publications / 10) * 100)}%` }} />
+                            style={{ width: `${Math.min(100, ((r.avgImpactFactor || 0) / 10) * 100)}%` }} />
                         </div>
+                        <span className="w-12 text-right text-xs font-medium text-gray-700">
+                          {r.avgImpactFactor != null ? r.avgImpactFactor.toFixed(1) : '—'}
+                        </span>
                         <span className={`text-xs font-medium w-8 text-right ${departmentColor(r.department).split(' ')[1]}`}>
                           {r.department}
                         </span>
@@ -320,10 +336,7 @@ export default function AnalyticsPage() {
                     <CardTitle>Impact Factor Distribution</CardTitle>
                     <p className="text-xs text-gray-500">Publications binned by journal IF tier</p>
                   </CardHeader>
-                  <ImpactFactorChart data={ifBuckets} />
-                  <p className="text-xs text-gray-400 mt-2 text-center">
-                    Note: Exact IF tier counts require journal_metrics data to be populated.
-                  </p>
+                  <ImpactFactorChart data={data?.impactFactorDistribution || []} />
                 </Card>
               </div>
             )}

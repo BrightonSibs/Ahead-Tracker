@@ -1,5 +1,124 @@
 import { prisma } from '@/lib/prisma';
+import { buildObservedCitationGrowthByYear } from '@/lib/citation-metrics';
 import type { FilterState, PaginatedResult, PublicationSummary } from '@/types';
+
+type PublicationWithRelations = Awaited<ReturnType<typeof fetchPublications>>[number];
+
+function toRangeStart(value: string) {
+  return new Date(`${value}T00:00:00.000Z`);
+}
+
+function toRangeEnd(value: string) {
+  return new Date(`${value}T23:59:59.999Z`);
+}
+
+function getImpactMetricYear(publicationYear: number | null | undefined) {
+  return publicationYear ?? new Date().getFullYear();
+}
+
+function getImpactMetricKey(journalName: string | null | undefined, publicationYear: number | null | undefined) {
+  if (!journalName) return null;
+  return `${journalName}::${getImpactMetricYear(publicationYear)}`;
+}
+
+async function fetchPublications(where: any, skip?: number, take?: number) {
+  return prisma.publication.findMany({
+    where,
+    include: {
+      authors: { orderBy: { authorOrder: 'asc' }, take: 5 },
+      citations: { orderBy: { capturedAt: 'desc' }, take: 1 },
+      specialties: { include: { specialty: true } },
+      matches: {
+        where: { manuallyExcluded: false },
+        include: { researcher: { select: { id: true, canonicalName: true, department: true } } },
+        orderBy: { matchConfidence: 'desc' },
+      },
+    },
+    orderBy: { publicationDate: 'desc' },
+    ...(skip !== undefined ? { skip } : {}),
+    ...(take !== undefined ? { take } : {}),
+  });
+}
+
+async function fetchJournalMetricMap(
+  publications: Array<{ journalName: string | null; publicationYear: number | null }>,
+) {
+  const uniquePairs = Array.from(
+    new Map(
+      publications
+        .filter(publication => publication.journalName)
+        .map(publication => [
+          getImpactMetricKey(publication.journalName, publication.publicationYear),
+          {
+            journalName: publication.journalName as string,
+            year: getImpactMetricYear(publication.publicationYear),
+          },
+        ]),
+    ).values(),
+  );
+
+  if (uniquePairs.length === 0) {
+    return new Map<string, { impactFactor: number | null; quartile: string | null }>();
+  }
+
+  const metrics = await prisma.journalMetric.findMany({
+    where: {
+      OR: uniquePairs.map(pair => ({
+        journalName: pair.journalName,
+        year: pair.year,
+      })),
+    },
+    select: {
+      journalName: true,
+      year: true,
+      impactFactor: true,
+      quartile: true,
+    },
+  });
+
+  return new Map(
+    metrics.map(metric => [
+      getImpactMetricKey(metric.journalName, metric.year) as string,
+      { impactFactor: metric.impactFactor, quartile: metric.quartile },
+    ]),
+  );
+}
+
+function getPublicationImpactFactor(
+  publication: { journalName: string | null; publicationYear: number | null },
+  metricMap: Map<string, { impactFactor: number | null }>,
+) {
+  const key = getImpactMetricKey(publication.journalName, publication.publicationYear);
+  return key ? metricMap.get(key)?.impactFactor ?? null : null;
+}
+
+function mapPublicationSummary(
+  publication: PublicationWithRelations,
+  metricMap: Map<string, { impactFactor: number | null }>,
+): PublicationSummary {
+  return {
+    id: publication.id,
+    title: publication.title,
+    doi: publication.doi,
+    publicationDate: publication.publicationDate?.toISOString() ?? null,
+    publicationYear: publication.publicationYear,
+    journalName: publication.journalName,
+    latestCitations: publication.citations[0]?.citationCount ?? 0,
+    impactFactor: getPublicationImpactFactor(publication, metricMap),
+    verifiedStatus: publication.verifiedStatus,
+    sourcePrimary: publication.sourcePrimary,
+    authors: publication.authors.map(author => author.authorName),
+    matchedResearchers: publication.matches.map(match => ({
+      id: match.researcher.id,
+      name: match.researcher.canonicalName,
+      department: match.researcher.department,
+      confidence: match.matchConfidence,
+      matchType: match.matchType,
+    })),
+    specialties: publication.specialties.map(specialty => specialty.specialty.name),
+    includedInSluOutput: publication.matches.some(match => match.includedInSluOutput),
+  };
+}
 
 export async function getPublications(
   filters: FilterState = {},
@@ -20,6 +139,13 @@ export async function getPublications(
     where.publicationYear = {
       ...(filters.yearFrom ? { gte: filters.yearFrom } : {}),
       ...(filters.yearTo ? { lte: filters.yearTo } : {}),
+    };
+  }
+
+  if (filters.dateFrom || filters.dateTo) {
+    where.publicationDate = {
+      ...(filters.dateFrom ? { gte: toRangeStart(filters.dateFrom) } : {}),
+      ...(filters.dateTo ? { lte: toRangeEnd(filters.dateTo) } : {}),
     };
   }
 
@@ -59,62 +185,41 @@ export async function getPublications(
     };
   }
 
-  const [total, pubs] = await Promise.all([
+  let total = 0;
+  let publications: PublicationWithRelations[] = [];
+
+  if (filters.minImpactFactor !== undefined) {
+    const allPublications = await fetchPublications(where);
+    const metricMap = await fetchJournalMetricMap(allPublications);
+    const filtered = allPublications.filter(publication => {
+      const impactFactor = getPublicationImpactFactor(publication, metricMap);
+      return impactFactor !== null && impactFactor >= filters.minImpactFactor!;
+    });
+
+    total = filtered.length;
+    publications = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+    return {
+      data: publications.map(publication => mapPublicationSummary(publication, metricMap)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  const [count, pagedPublications] = await Promise.all([
     prisma.publication.count({ where }),
-    prisma.publication.findMany({
-      where,
-      include: {
-        authors: { orderBy: { authorOrder: 'asc' }, take: 5 },
-        citations: { orderBy: { capturedAt: 'desc' }, take: 1 },
-        specialties: { include: { specialty: true } },
-        matches: {
-          where: { manuallyExcluded: false },
-          include: { researcher: { select: { id: true, canonicalName: true, department: true } } },
-          orderBy: { matchConfidence: 'desc' },
-        },
-      },
-      orderBy: { publicationDate: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
+    fetchPublications(where, (page - 1) * pageSize, pageSize),
   ]);
 
-  // Filter by impact factor post-query (needs journal metrics join)
-  const journalMetrics = filters.minImpactFactor
-    ? await prisma.journalMetric.findMany({
-        where: { impactFactor: { gte: filters.minImpactFactor } },
-        select: { journalName: true },
-      })
-    : null;
-  const eligibleJournals = journalMetrics ? new Set(journalMetrics.map(j => j.journalName)) : null;
+  total = count;
+  publications = pagedPublications;
 
-  const data: PublicationSummary[] = pubs
-    .filter(p => !eligibleJournals || (p.journalName && eligibleJournals.has(p.journalName)))
-    .map(p => ({
-      id: p.id,
-      title: p.title,
-      doi: p.doi,
-      publicationDate: p.publicationDate?.toISOString() ?? null,
-      publicationYear: p.publicationYear,
-      journalName: p.journalName,
-      latestCitations: p.citations[0]?.citationCount ?? 0,
-      impactFactor: null, // enriched separately
-      verifiedStatus: p.verifiedStatus,
-      sourcePrimary: p.sourcePrimary,
-      authors: p.authors.map(a => a.authorName),
-      matchedResearchers: p.matches.map(m => ({
-        id: m.researcher.id,
-        name: m.researcher.canonicalName,
-        department: m.researcher.department,
-        confidence: m.matchConfidence,
-        matchType: m.matchType,
-      })),
-      specialties: p.specialties.map(s => s.specialty.name),
-      includedInSluOutput: p.matches.some(m => m.includedInSluOutput),
-    }));
+  const metricMap = await fetchJournalMetricMap(publications);
 
   return {
-    data,
+    data: publications.map(publication => mapPublicationSummary(publication, metricMap)),
     total,
     page,
     pageSize,
@@ -145,28 +250,26 @@ export async function getPublicationById(id: string) {
 
   if (!pub) return null;
 
-  // Get journal IF for publication year
   const journalMetric = pub.journalName
     ? await prisma.journalMetric.findFirst({
         where: {
           journalName: pub.journalName,
-          year: pub.publicationYear ?? new Date().getFullYear(),
+          year: getImpactMetricYear(pub.publicationYear),
         },
       })
     : null;
 
-  // Build citation history for chart
-  const citHistory = pub.citations.map(c => ({
-    date: c.capturedAt.toISOString().split('T')[0],
-    count: c.citationCount,
-    source: c.source,
+  const citationHistory = pub.citations.map(citation => ({
+    date: citation.capturedAt.toISOString().split('T')[0],
+    count: citation.citationCount,
+    source: citation.source,
   }));
 
   return {
     ...pub,
     publicationDate: pub.publicationDate?.toISOString() ?? null,
     impactFactor: journalMetric?.impactFactor ?? null,
-    citationHistory: citHistory,
+    citationHistory,
     latestCitationCount: pub.citations.length > 0
       ? pub.citations[pub.citations.length - 1].citationCount
       : 0,
@@ -196,73 +299,144 @@ export async function getAnalyticsData(filters: FilterState = {}) {
     },
   });
 
-  // Annual publications by dept
-  const pubsByYear: Record<number, Record<string, number>> = {};
-  const citsByYear: Record<number, Record<string, number>> = {};
+  const publicationEntries = new Map<string, {
+    publication: (typeof researchers)[number]['matches'][number]['publication'];
+    departments: Set<string>;
+  }>();
 
-  for (const r of researchers) {
-    for (const match of r.matches) {
-      const yr = match.publication.publicationYear ?? 0;
-      if (!pubsByYear[yr]) pubsByYear[yr] = {};
-      pubsByYear[yr][r.department] = (pubsByYear[yr][r.department] || 0) + 1;
-
-      // Annual citations from history
-      for (const cit of match.publication.citations) {
-        const citYr = cit.capturedAt.getFullYear();
-        if (!citsByYear[citYr]) citsByYear[citYr] = {};
-        citsByYear[citYr][r.department] = (citsByYear[citYr][r.department] || 0) + cit.citationCount;
+  for (const researcher of researchers) {
+    for (const match of researcher.matches) {
+      const existing = publicationEntries.get(match.publication.id);
+      if (existing) {
+        existing.departments.add(researcher.department);
+      } else {
+        publicationEntries.set(match.publication.id, {
+          publication: match.publication,
+          departments: new Set([researcher.department]),
+        });
       }
     }
   }
 
-  // Specialty distribution
-  const specCounts: Record<string, number> = {};
-  for (const r of researchers) {
-    for (const match of r.matches) {
-      for (const sp of match.publication.specialties) {
-        specCounts[sp.specialty.name] = (specCounts[sp.specialty.name] || 0) + 1;
+  const uniquePublications = Array.from(publicationEntries.values()).map(entry => entry.publication);
+  const metricMap = await fetchJournalMetricMap(uniquePublications);
+
+  const publicationsByYear: Record<number, Record<string, number>> = {};
+  const citationsByYear: Record<number, Record<string, number>> = {};
+  const specialtyCounts: Record<string, number> = {};
+  const specialtyCitationsByYear: Record<number, Record<string, number>> = {};
+  const specialtyCitationTotals: Record<string, number> = {};
+
+  for (const { publication, departments } of publicationEntries.values()) {
+    const publicationYear = publication.publicationYear ?? 0;
+    if (!publicationsByYear[publicationYear]) publicationsByYear[publicationYear] = {};
+    for (const department of departments) {
+      publicationsByYear[publicationYear][department] = (publicationsByYear[publicationYear][department] || 0) + 1;
+    }
+
+    const citationGrowthByYear = buildObservedCitationGrowthByYear(publication.citations);
+    for (const [yearString, growth] of Object.entries(citationGrowthByYear)) {
+      const year = Number(yearString);
+      if (!citationsByYear[year]) citationsByYear[year] = {};
+      for (const department of departments) {
+        citationsByYear[year][department] = (citationsByYear[year][department] || 0) + growth;
+      }
+    }
+
+    for (const specialty of publication.specialties) {
+      specialtyCounts[specialty.specialty.name] = (specialtyCounts[specialty.specialty.name] || 0) + 1;
+    }
+
+    for (const [yearString, growth] of Object.entries(citationGrowthByYear)) {
+      const year = Number(yearString);
+      if (!specialtyCitationsByYear[year]) specialtyCitationsByYear[year] = {};
+
+      for (const specialty of publication.specialties) {
+        const specialtyName = specialty.specialty.name;
+        specialtyCitationsByYear[year][specialtyName] =
+          (specialtyCitationsByYear[year][specialtyName] || 0) + growth;
+        specialtyCitationTotals[specialtyName] = (specialtyCitationTotals[specialtyName] || 0) + growth;
       }
     }
   }
 
-  // Researcher h-index table
+  const topSpecialtiesByCitations = Object.entries(specialtyCitationTotals)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([specialty]) => specialty);
+
+  const impactFactorDistribution = [
+    { bucket: 'IF < 2', count: 0 },
+    { bucket: 'IF 2-5', count: 0 },
+    { bucket: 'IF 5-10', count: 0 },
+    { bucket: 'IF > 10', count: 0 },
+  ];
+
+  for (const publication of uniquePublications) {
+    const impactFactor = getPublicationImpactFactor(publication, metricMap);
+    if (impactFactor === null) continue;
+    if (impactFactor < 2) impactFactorDistribution[0].count += 1;
+    else if (impactFactor < 5) impactFactorDistribution[1].count += 1;
+    else if (impactFactor <= 10) impactFactorDistribution[2].count += 1;
+    else impactFactorDistribution[3].count += 1;
+  }
+
   const { calcHIndex, calcI10Index } = await import('@/lib/utils');
-  const researcherStats = researchers.map(r => {
-    const cits = r.matches.map(m =>
-      m.publication.citations.length > 0
-        ? m.publication.citations[m.publication.citations.length - 1].citationCount
-        : 0
+  const researcherStats = researchers.map(researcher => {
+    const citations = researcher.matches.map(match =>
+      match.publication.citations.length > 0
+        ? match.publication.citations[match.publication.citations.length - 1].citationCount
+        : 0,
     );
+    const impactFactors = researcher.matches
+      .map(match => getPublicationImpactFactor(match.publication, metricMap))
+      .filter((value): value is number => value !== null);
+
     return {
-      id: r.id,
-      name: r.canonicalName,
-      department: r.department,
-      publications: r.matches.length,
-      totalCitations: cits.reduce((a, b) => a + b, 0),
-      hIndex: calcHIndex(cits),
-      i10Index: calcI10Index(cits),
+      id: researcher.id,
+      name: researcher.canonicalName,
+      department: researcher.department,
+      publications: researcher.matches.length,
+      totalCitations: citations.reduce((sum, count) => sum + count, 0),
+      hIndex: calcHIndex(citations),
+      i10Index: calcI10Index(citations),
+      avgImpactFactor: impactFactors.length > 0
+        ? Number((impactFactors.reduce((sum, value) => sum + value, 0) / impactFactors.length).toFixed(2))
+        : null,
     };
   }).sort((a, b) => b.hIndex - a.hIndex);
 
   const years = Array.from(new Set([
-    ...Object.keys(pubsByYear).map(Number),
-    ...Object.keys(citsByYear).map(Number),
+    ...Object.keys(publicationsByYear).map(Number),
+    ...Object.keys(citationsByYear).map(Number),
   ])).sort((a, b) => a - b);
 
   return {
-    publicationsByYear: years.map(yr => ({
-      year: yr,
-      AHEAD: pubsByYear[yr]?.AHEAD ?? 0,
-      HCOR: pubsByYear[yr]?.HCOR ?? 0,
+    publicationsByYear: years.map(year => ({
+      year,
+      AHEAD: publicationsByYear[year]?.AHEAD ?? 0,
+      HCOR: publicationsByYear[year]?.HCOR ?? 0,
     })),
-    citationsByYear: years.map(yr => ({
-      year: yr,
-      AHEAD: citsByYear[yr]?.AHEAD ?? 0,
-      HCOR: citsByYear[yr]?.HCOR ?? 0,
+    citationsByYear: years.map(year => ({
+      year,
+      AHEAD: citationsByYear[year]?.AHEAD ?? 0,
+      HCOR: citationsByYear[year]?.HCOR ?? 0,
     })),
-    specialtyDistribution: Object.entries(specCounts)
+    specialtyDistribution: Object.entries(specialtyCounts)
       .sort((a, b) => b[1] - a[1])
       .map(([specialty, count]) => ({ specialty, count })),
+    specialtyCitationTrends: years.map(year => ({
+      year,
+      ...topSpecialtiesByCitations.reduce<Record<string, number>>((acc, specialty) => {
+        acc[specialty] = specialtyCitationsByYear[year]?.[specialty] ?? 0;
+        return acc;
+      }, {}),
+    })),
+    specialtyCitationTrendKeys: topSpecialtiesByCitations.map(specialty => ({
+      key: specialty,
+      name: specialty,
+    })),
+    impactFactorDistribution,
     researcherStats,
   };
 }

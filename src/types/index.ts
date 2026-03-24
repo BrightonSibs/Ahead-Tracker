@@ -57,6 +57,8 @@ export interface FilterState {
   researcherId?: string;
   yearFrom?: number;
   yearTo?: number;
+  dateFrom?: string;
+  dateTo?: string;
   sluOnly?: boolean;
   minImpactFactor?: number;
   specialty?: string;

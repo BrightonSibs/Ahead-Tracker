@@ -10,8 +10,11 @@ import { departmentColor } from '@/lib/utils';
 interface Node {
   id: string;
   name: string;
+  canonicalName: string;
   department: string;
   publicationCount: number;
+  totalCitations: number;
+  hIndex: number;
   x: number;
   y: number;
   vx: number;
@@ -44,38 +47,33 @@ export default function CollaborationsPage() {
   const [selected, setSelected] = useState<any>(null);
   const [topPairs, setTopPairs] = useState<any[]>([]);
   const [topCollaborators, setTopCollaborators] = useState<any[]>([]);
-  const [allResearchers, setAllResearchers] = useState<any[]>([]);
+
+  const getNodeAtPosition = useCallback((mouseX: number, mouseY: number) => {
+    let found: Node | null = null;
+
+    nodesRef.current.forEach(node => {
+      if (Math.sqrt((node.x - mouseX) ** 2 + (node.y - mouseY) ** 2) < node.r + 8) {
+        found = node;
+      }
+    });
+
+    return found;
+  }, []);
 
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
 
-  const buildNetwork = useCallback((researchers: any[], publications: any[]) => {
-    const edgeCounts: Record<string, number> = {};
-
-    publications.forEach((publication: any) => {
-      const researcherIds = publication.matchedResearchers.map((match: any) => match.id);
-      for (let i = 0; i < researcherIds.length; i++) {
-        for (let j = i + 1; j < researcherIds.length; j++) {
-          const key = [researcherIds[i], researcherIds[j]].sort().join('|');
-          edgeCounts[key] = (edgeCounts[key] || 0) + 1;
-        }
-      }
-    });
-
+  const buildNetwork = useCallback((network: { nodes: any[]; edges: Edge[] }) => {
     const width = canvasRef.current?.offsetWidth || 920;
     const height = canvasRef.current?.offsetHeight || 520;
 
     const filteredResearchers = deptFilter
-      ? researchers.filter(researcher => researcher.department === deptFilter)
-      : researchers;
+      ? network.nodes.filter(researcher => researcher.department === deptFilter)
+      : network.nodes;
 
-    const filteredEdges = Object.entries(edgeCounts)
-      .filter(([, weight]) => weight >= minCoauth)
-      .map(([key, weight]) => {
-        const [source, target] = key.split('|');
-        return { source, target, weight };
-      })
+    const filteredEdges = network.edges
+      .filter(edge => edge.weight >= minCoauth)
       .filter(edge =>
         filteredResearchers.some(researcher => researcher.id === edge.source) &&
         filteredResearchers.some(researcher => researcher.id === edge.target),
@@ -110,9 +108,12 @@ export default function CollaborationsPage() {
 
       return {
         id: researcher.id,
-        name: researcher.canonicalName,
+        name: researcher.name,
+        canonicalName: researcher.canonicalName || researcher.name,
         department: researcher.department,
         publicationCount: researcher.publicationCount,
+        totalCitations: researcher.totalCitations || 0,
+        hIndex: researcher.hIndex || 0,
         x: laneCenterX + Math.cos(angle) * orbit + (Math.random() - 0.5) * 18,
         y: sharedCenterY + Math.sin(angle) * orbit + (Math.random() - 0.5) * 18,
         vx: 0,
@@ -124,14 +125,14 @@ export default function CollaborationsPage() {
 
     edgesRef.current = filteredEdges;
 
-    const pairs = Object.entries(edgeCounts)
-      .sort(([, a], [, b]) => b - a)
+    const pairs = filteredEdges
+      .slice()
+      .sort((a, b) => b.weight - a.weight)
       .slice(0, 6)
-      .map(([key, count]) => {
-        const [aId, bId] = key.split('|');
-        const rA = researchers.find(researcher => researcher.id === aId);
-        const rB = researchers.find(researcher => researcher.id === bId);
-        return { rA, rB, count };
+      .map(edge => {
+        const rA = filteredResearchers.find(researcher => researcher.id === edge.source);
+        const rB = filteredResearchers.find(researcher => researcher.id === edge.target);
+        return { rA, rB, count: edge.weight };
       })
       .filter(pair => pair.rA && pair.rB);
     setTopPairs(pairs);
@@ -150,13 +151,10 @@ export default function CollaborationsPage() {
     const params = new URLSearchParams();
     if (deptFilter) params.set('department', deptFilter);
 
-    fetchJsonCached<any[]>(`/api/researchers?${params}`)
-      .then(async researchers => {
+    fetchJsonCached<any>(`/api/collaborations?${params}`)
+      .then(network => {
         if (cancelled) return;
-        setAllResearchers(researchers);
-        const publicationData = await fetchJsonCached<any>('/api/publications?pageSize=200');
-        if (cancelled) return;
-        buildNetwork(researchers, publicationData.data || []);
+        buildNetwork(network);
         setLoading(false);
       })
       .catch(() => {
@@ -334,6 +332,8 @@ export default function CollaborationsPage() {
   }, [loading, startAnimation]);
 
   useEffect(() => {
+    if (loading) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -341,13 +341,7 @@ export default function CollaborationsPage() {
       const rect = canvas.getBoundingClientRect();
       const mouseX = event.clientX - rect.left;
       const mouseY = event.clientY - rect.top;
-      let found: Node | null = null;
-
-      nodesRef.current.forEach(node => {
-        if (Math.sqrt((node.x - mouseX) ** 2 + (node.y - mouseY) ** 2) < node.r + 8) {
-          found = node;
-        }
-      });
+      const found = getNodeAtPosition(mouseX, mouseY);
 
       hoveredRef.current = found;
 
@@ -385,36 +379,57 @@ export default function CollaborationsPage() {
       const mouseY = event.clientY - rect.top;
       dragMovedRef.current = false;
       dragOriginRef.current = { x: mouseX, y: mouseY };
-      nodesRef.current.forEach(node => {
-        if (Math.sqrt((node.x - mouseX) ** 2 + (node.y - mouseY) ** 2) < node.r + 8) {
-          draggingRef.current = node;
-          canvas.style.cursor = 'grabbing';
-        }
-      });
+      draggingRef.current = getNodeAtPosition(mouseX, mouseY);
+      if (draggingRef.current) {
+        canvas.style.cursor = 'grabbing';
+      }
     };
 
-    const onMouseUp = () => {
+    const onMouseUp = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      const clickedNode = getNodeAtPosition(mouseX, mouseY);
+
       if (draggingRef.current && !dragMovedRef.current) {
-        setSelected(allResearchers.find(researcher => researcher.id === draggingRef.current?.id) || null);
+        setSelected(clickedNode || draggingRef.current);
+      } else if (!dragMovedRef.current && clickedNode) {
+        setSelected(clickedNode);
       }
+
       draggingRef.current = null;
       dragOriginRef.current = null;
       canvas.style.cursor = hoveredRef.current ? 'pointer' : 'default';
     };
 
+    const onClick = (event: MouseEvent) => {
+      if (dragMovedRef.current) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      const clickedNode = getNodeAtPosition(mouseX, mouseY);
+
+      if (clickedNode) {
+        setSelected(clickedNode);
+      }
+    };
+
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mousedown', onMouseDown);
     canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('click', onClick);
     canvas.addEventListener('mouseleave', onMouseUp);
 
     return () => {
       canvas.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('mousedown', onMouseDown);
       canvas.removeEventListener('mouseup', onMouseUp);
+      canvas.removeEventListener('click', onClick);
       canvas.removeEventListener('mouseleave', onMouseUp);
       cancelAnimationFrame(animRef.current);
     };
-  }, [allResearchers]);
+  }, [loading, getNodeAtPosition]);
 
   return (
     <PageLayout>

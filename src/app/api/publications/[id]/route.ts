@@ -4,6 +4,10 @@ import { authOptions } from '@/lib/auth';
 import { getPublicationById } from '@/lib/services/publications';
 import { prisma } from '@/lib/prisma';
 
+function normalizeTitle(value: string) {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[^a-z0-9\s]/g, '');
+}
+
 function parseOptionalDate(value: unknown) {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
@@ -58,7 +62,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let updated = await prisma.publication.update({
       where: { id },
       data: {
-        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.title !== undefined ? { title: body.title, normalizedTitle: normalizeTitle(body.title) } : {}),
         ...(body.doi !== undefined ? { doi: body.doi } : {}),
         ...(body.journalName !== undefined ? { journalName: body.journalName } : {}),
         ...(publicationDate !== undefined ? { publicationDate } : {}),

@@ -1,6 +1,25 @@
 import { prisma } from '@/lib/prisma';
+import { buildObservedCitationGrowthByYear, getLatestCitationCount } from '@/lib/citation-metrics';
 import { calcHIndex, calcI10Index } from '@/lib/utils';
 import type { ResearcherSummary } from '@/types';
+
+function buildResearcherWhere(filters?: {
+  department?: string;
+  search?: string;
+  active?: boolean;
+}) {
+  return {
+    ...(filters?.department ? { department: filters.department } : {}),
+    ...(filters?.active !== undefined ? { activeStatus: filters.active } : {}),
+    ...(filters?.search ? {
+      OR: [
+        { canonicalName: { contains: filters.search } },
+        { department: { contains: filters.search } },
+        { aliases: { some: { aliasName: { contains: filters.search } } } },
+      ],
+    } : {}),
+  };
+}
 
 export async function getAllResearchers(filters?: {
   department?: string;
@@ -8,17 +27,7 @@ export async function getAllResearchers(filters?: {
   active?: boolean;
 }): Promise<ResearcherSummary[]> {
   const researchers = await prisma.researcher.findMany({
-    where: {
-      ...(filters?.department ? { department: filters.department } : {}),
-      ...(filters?.active !== undefined ? { activeStatus: filters.active } : {}),
-      ...(filters?.search ? {
-        OR: [
-          { canonicalName: { contains: filters.search } },
-          { department: { contains: filters.search } },
-          { aliases: { some: { aliasName: { contains: filters.search } } } },
-        ],
-      } : {}),
-    },
+    where: buildResearcherWhere(filters),
     include: {
       aliases: true,
       specialties: { include: { specialty: true } },
@@ -71,6 +80,56 @@ export async function getAllResearchers(filters?: {
   });
 }
 
+export async function getResearchersSummary(filters?: {
+  department?: string;
+  search?: string;
+  active?: boolean;
+  sluOnly?: boolean;
+}) {
+  const researcherWhere = buildResearcherWhere(filters);
+
+  const [researcherCount, publicationMatches] = await Promise.all([
+    prisma.researcher.count({ where: researcherWhere }),
+    prisma.publicationResearcherMatch.findMany({
+      where: {
+        manuallyExcluded: false,
+        ...(filters?.sluOnly ? { includedInSluOutput: true } : {}),
+        researcher: researcherWhere,
+      },
+      select: { publicationId: true },
+      distinct: ['publicationId'],
+    }),
+  ]);
+
+  const publicationIds = publicationMatches.map(match => match.publicationId);
+  if (publicationIds.length === 0) {
+    return {
+      totalResearchers: researcherCount,
+      totalPublications: 0,
+      totalCitations: 0,
+    };
+  }
+
+  const citations = await prisma.citation.findMany({
+    where: { publicationId: { in: publicationIds } },
+    orderBy: { capturedAt: 'desc' },
+    select: { publicationId: true, citationCount: true },
+  });
+
+  const latestByPublication: Record<string, number> = {};
+  for (const citation of citations) {
+    if (!(citation.publicationId in latestByPublication)) {
+      latestByPublication[citation.publicationId] = citation.citationCount;
+    }
+  }
+
+  return {
+    totalResearchers: researcherCount,
+    totalPublications: publicationIds.length,
+    totalCitations: Object.values(latestByPublication).reduce((sum, count) => sum + count, 0),
+  };
+}
+
 export async function getResearcherById(id: string, sluOnly = false) {
   const researcher = await prisma.researcher.findUnique({
     where: { id },
@@ -100,21 +159,20 @@ export async function getResearcherById(id: string, sluOnly = false) {
   if (!researcher) return null;
 
   const citations = researcher.matches.map(m =>
-    m.publication.citations.length > 0
-      ? m.publication.citations[m.publication.citations.length - 1].citationCount
-      : 0
+    getLatestCitationCount(m.publication.citations)
   );
 
   const totalCitations = citations.reduce((a, b) => a + b, 0);
   const hIndex = calcHIndex(citations);
   const i10Index = calcI10Index(citations);
 
-  // Build citation trend by year
+  // Build a conservative year-over-year growth series from stored snapshots.
   const citByYear: Record<number, number> = {};
   for (const match of researcher.matches) {
-    for (const cit of match.publication.citations) {
-      const yr = cit.capturedAt.getFullYear();
-      citByYear[yr] = (citByYear[yr] || 0) + cit.citationCount;
+    const growthByYear = buildObservedCitationGrowthByYear(match.publication.citations);
+    for (const [year, growth] of Object.entries(growthByYear)) {
+      const numericYear = Number(year);
+      citByYear[numericYear] = (citByYear[numericYear] || 0) + growth;
     }
   }
 
@@ -129,12 +187,44 @@ export async function getResearcherById(id: string, sluOnly = false) {
     .slice(0, 5)
     .map(([name, count]) => ({ name, count }));
 
-  // Co-authors (internal)
-  const coauthorIds = new Set<string>();
-  for (const match of researcher.matches) {
-    const pub = match.publication as any;
-    // We'd need to fetch co-authors separately in a real query
+  const publicationIds = researcher.matches.map(match => match.publicationId);
+  const collaboratorMatches = publicationIds.length > 0
+    ? await prisma.publicationResearcherMatch.findMany({
+        where: {
+          publicationId: { in: publicationIds },
+          manuallyExcluded: false,
+          researcherId: { not: id },
+        },
+        include: {
+          researcher: {
+            select: {
+              id: true,
+              canonicalName: true,
+              department: true,
+            },
+          },
+        },
+      })
+    : [];
+
+  const collaboratorCounts = new Map<string, { id: string; name: string; department: string; sharedPublications: number }>();
+  for (const match of collaboratorMatches) {
+    const existing = collaboratorCounts.get(match.researcherId);
+    if (existing) {
+      existing.sharedPublications += 1;
+    } else {
+      collaboratorCounts.set(match.researcherId, {
+        id: match.researcher.id,
+        name: match.researcher.canonicalName,
+        department: match.researcher.department,
+        sharedPublications: 1,
+      });
+    }
   }
+
+  const topCollaborators = Array.from(collaboratorCounts.values())
+    .sort((a, b) => b.sharedPublications - a.sharedPublications || a.name.localeCompare(b.name))
+    .slice(0, 8);
 
   return {
     ...researcher,
@@ -147,6 +237,7 @@ export async function getResearcherById(id: string, sluOnly = false) {
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([year, citations]) => ({ year: Number(year), citations })),
     topJournals,
+    topCollaborators,
     specialties: researcher.specialties.map(s => s.specialty),
   };
 }
@@ -157,7 +248,13 @@ export async function getCollaborationNetwork(department?: string) {
     include: {
       matches: {
         where: { manuallyExcluded: false },
-        select: { publicationId: true, researcherId: true },
+        include: {
+          publication: {
+            include: {
+              citations: { orderBy: { capturedAt: 'desc' }, take: 1 },
+            },
+          },
+        },
       },
     },
   });
@@ -184,8 +281,11 @@ export async function getCollaborationNetwork(department?: string) {
   const nodes = researchers.map(r => ({
     id: r.id,
     name: r.canonicalName,
+    canonicalName: r.canonicalName,
     department: r.department,
     publicationCount: r.matches.length,
+    totalCitations: r.matches.reduce((sum, match) => sum + getLatestCitationCount(match.publication.citations), 0),
+    hIndex: calcHIndex(r.matches.map(match => getLatestCitationCount(match.publication.citations))),
   }));
 
   const edges = Object.entries(edgeMap).map(([key, weight]) => {

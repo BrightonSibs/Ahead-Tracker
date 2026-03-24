@@ -71,6 +71,13 @@ function normalizeTitle(value: string) {
     .replace(/[^a-z0-9\s]/g, '');
 }
 
+function normalizeJournalName(value: string | null | undefined) {
+  if (!value) return null;
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '');
+}
+
 function normalizeDoi(value: string | null | undefined) {
   if (!value) return null;
   return value
@@ -78,6 +85,15 @@ function normalizeDoi(value: string | null | undefined) {
     .replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
     .replace(/^doi:/i, '')
     .toLowerCase();
+}
+
+function normalizeOrcid(value: string | null | undefined) {
+  if (!value) return null;
+  return value
+    .trim()
+    .replace(/^https?:\/\/orcid\.org\//i, '')
+    .replace(/^orcid\.org\//i, '')
+    .toUpperCase();
 }
 
 function buildDate(year?: number | null, month?: number | null, day?: number | null) {
@@ -120,6 +136,10 @@ function getResearcherIdentifier(researcher: ResearcherWithAliases, identifierTy
   );
 }
 
+function getResearcherOrcid(researcher: ResearcherWithAliases) {
+  return normalizeOrcid(researcher.orcid) || normalizeOrcid(getResearcherIdentifier(researcher, ['ORCID']));
+}
+
 function surnameOf(value: string) {
   const parts = normalizeWhitespace(value).split(' ');
   return parts[parts.length - 1]?.toLowerCase() || '';
@@ -130,7 +150,7 @@ function firstInitialOf(value: string) {
 }
 
 function resolveAuthorMatch(researcher: ResearcherWithAliases, authorNames: string[], source: SyncSource) {
-  if (source === 'ORCID' && researcher.orcid) {
+  if (source === 'ORCID' && getResearcherOrcid(researcher)) {
     return { matchType: 'ORCID_MATCH', confidence: 1.0 };
   }
 
@@ -216,6 +236,99 @@ function dedupeCandidates(candidates: PublicationCandidate[]) {
   }
 
   return Array.from(deduped.values());
+}
+
+async function findExistingPublication(
+  researcher: ResearcherWithAliases,
+  candidate: PublicationCandidate,
+  normalizedTitle: string,
+) {
+  if (candidate.doi) {
+    const byDoi = await prisma.publication.findUnique({ where: { doi: candidate.doi } });
+    if (byDoi) return byDoi;
+  }
+
+  if (candidate.pubmedId) {
+    const byPubmedId = await prisma.publication.findUnique({ where: { pubmedId: candidate.pubmedId } });
+    if (byPubmedId) return byPubmedId;
+  }
+
+  if (candidate.externalId) {
+    const sourceRecord = await prisma.sourceRecord.findFirst({
+      where: {
+        source: candidate.source,
+        externalId: candidate.externalId,
+        publicationId: { not: null },
+      },
+      include: {
+        publication: true,
+      },
+    });
+
+    if (sourceRecord?.publication) return sourceRecord.publication;
+  }
+
+  if (candidate.publicationYear) {
+    const byTitleAndYear = await prisma.publication.findFirst({
+      where: {
+        normalizedTitle,
+        publicationYear: candidate.publicationYear,
+      },
+    });
+
+    if (byTitleAndYear) return byTitleAndYear;
+  }
+
+  const matchedPublication = await prisma.publicationResearcherMatch.findFirst({
+    where: {
+      researcherId: researcher.id,
+      publication: { normalizedTitle },
+    },
+    include: {
+      publication: true,
+    },
+    orderBy: {
+      publication: { updatedAt: 'desc' },
+    },
+  });
+
+  if (matchedPublication?.publication) return matchedPublication.publication;
+
+  const sameTitlePublications = await prisma.publication.findMany({
+    where: { normalizedTitle },
+    orderBy: [
+      { updatedAt: 'desc' },
+      { createdAt: 'desc' },
+    ],
+    take: 10,
+  });
+
+  if (sameTitlePublications.length === 1) {
+    return sameTitlePublications[0];
+  }
+
+  const normalizedJournal = normalizeJournalName(candidate.journalName);
+  if (normalizedJournal) {
+    const journalMatches = sameTitlePublications.filter(publication =>
+      normalizeJournalName(publication.journalName) === normalizedJournal
+    );
+
+    if (journalMatches.length === 1) {
+      return journalMatches[0];
+    }
+  }
+
+  if (candidate.publicationYear) {
+    const nearbyYearMatches = sameTitlePublications.filter(publication =>
+      publication.publicationYear != null && Math.abs(publication.publicationYear - candidate.publicationYear!) <= 2
+    );
+
+    if (nearbyYearMatches.length === 1) {
+      return nearbyYearMatches[0];
+    }
+  }
+
+  return null;
 }
 
 async function fetchCrossrefCandidates(researcher: ResearcherWithAliases) {
@@ -333,9 +446,10 @@ async function fetchPubmedCandidates(researcher: ResearcherWithAliases) {
 }
 
 async function fetchOrcidCandidates(researcher: ResearcherWithAliases) {
-  if (!researcher.orcid) return [];
+  const researcherOrcid = getResearcherOrcid(researcher);
+  if (!researcherOrcid) return [];
 
-  const worksUrl = `https://pub.orcid.org/v3.0/${researcher.orcid}/works`;
+  const worksUrl = `https://pub.orcid.org/v3.0/${researcherOrcid}/works`;
   const worksData = await fetchJson<{
     group?: Array<{
       'work-summary'?: Array<any>;
@@ -549,22 +663,11 @@ async function persistCandidate(researcher: ResearcherWithAliases, candidate: Pu
   const normalizedTitle = normalizeTitle(candidate.title);
   if (!normalizedTitle) return { created: 0, updated: 0 };
 
-  let publication =
-    (candidate.doi
-      ? await prisma.publication.findUnique({ where: { doi: candidate.doi } })
-      : null) ||
-    (candidate.pubmedId
-      ? await prisma.publication.findUnique({ where: { pubmedId: candidate.pubmedId } })
-      : null) ||
-    (await prisma.publication.findFirst({
-      where: {
-        normalizedTitle,
-        ...(candidate.publicationYear ? { publicationYear: candidate.publicationYear } : {}),
-      },
-    }));
+  let publication = await findExistingPublication(researcher, candidate, normalizedTitle);
 
   let created = 0;
   let updated = 0;
+  const alerts: Array<{ alertType: string; title: string; message: string; entityId: string; entityType: string }> = [];
 
   if (!publication) {
     publication = await prisma.publication.create({
@@ -582,6 +685,13 @@ async function persistCandidate(researcher: ResearcherWithAliases, candidate: Pu
       },
     });
     created = 1;
+    alerts.push({
+      alertType: 'NEW_PUBLICATION',
+      title: 'New publication detected',
+      message: `${researcher.canonicalName} has a new publication: "${candidate.title}".`,
+      entityId: publication.id,
+      entityType: 'publication',
+    });
   } else {
     const updateData: Record<string, string | number | Date | null> = {};
     if (!publication.doi && candidate.doi) updateData.doi = candidate.doi;
@@ -688,10 +798,22 @@ async function persistCandidate(researcher: ResearcherWithAliases, candidate: Pu
         },
       });
       if (!created) updated = 1;
+
+      if (latestCitation && candidate.citationCount > latestCitation.citationCount) {
+        alerts.push({
+          alertType: 'CITATION_INCREASE',
+          title: 'Citation count increased',
+          message:
+            `"${candidate.title}" gained ${candidate.citationCount - latestCitation.citationCount} citation` +
+            `${candidate.citationCount - latestCitation.citationCount === 1 ? '' : 's'} for ${researcher.canonicalName}.`,
+          entityId: publication.id,
+          entityType: 'publication',
+        });
+      }
     }
   }
 
-  return { created, updated };
+  return { created, updated, alerts };
 }
 
 export async function runSyncJob(source: SyncSource, triggeredBy?: string, researcherId?: string) {
@@ -720,6 +842,7 @@ export async function runSyncJob(source: SyncSource, triggeredBy?: string, resea
     let recordsCreated = 0;
     let recordsUpdated = 0;
     const errors: string[] = [];
+    const alertsToCreate: Array<{ alertType: string; title: string; message: string; entityId: string; entityType: string }> = [];
 
     for (const researcher of researchers) {
       try {
@@ -730,6 +853,7 @@ export async function runSyncJob(source: SyncSource, triggeredBy?: string, resea
           const result = await persistCandidate(researcher, candidate);
           recordsCreated += result.created;
           recordsUpdated += result.updated;
+          alertsToCreate.push(...(result.alerts || []));
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown sync error';
@@ -739,6 +863,15 @@ export async function runSyncJob(source: SyncSource, triggeredBy?: string, resea
 
     const status =
       errors.length === 0 ? 'COMPLETED' : recordsFound > 0 || recordsCreated > 0 || recordsUpdated > 0 ? 'PARTIAL' : 'FAILED';
+
+    if (alertsToCreate.length > 0) {
+      await prisma.alert.createMany({
+        data: alertsToCreate.slice(0, 25).map(alert => ({
+          ...alert,
+          resolved: false,
+        })),
+      });
+    }
 
     return prisma.syncJob.update({
       where: { id: job.id },
