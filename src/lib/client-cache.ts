@@ -8,6 +8,24 @@ type CacheEntry<T> = {
 const responseCache = new Map<string, CacheEntry<unknown>>();
 const inflightRequests = new Map<string, Promise<unknown>>();
 
+function handleAuthFailure(status: number, url: string) {
+  if (typeof window === 'undefined' || status !== 401) return;
+
+  responseCache.clear();
+  window.dispatchEvent(new CustomEvent('ahead:auth-error', { detail: { status, url } }));
+}
+
+async function readJsonResponse<T>(response: Response, url: string, ttlMs: number): Promise<T> {
+  if (!response.ok) {
+    handleAuthFailure(response.status, url);
+    throw new Error(`Request failed (${response.status}) for ${url}`);
+  }
+
+  const data = await response.json();
+  responseCache.set(url, { data, expiresAt: Date.now() + ttlMs });
+  return data as T;
+}
+
 export async function fetchJsonCached<T>(
   url: string,
   options?: { ttlMs?: number; force?: boolean },
@@ -23,15 +41,7 @@ export async function fetchJsonCached<T>(
   if (!options?.force && cached) {
     if (!inflightRequests.has(url)) {
       const refresh = fetch(url)
-        .then(async response => {
-          if (!response.ok) {
-            throw new Error(`Request failed (${response.status}) for ${url}`);
-          }
-
-          const data = await response.json();
-          responseCache.set(url, { data, expiresAt: Date.now() + ttlMs });
-          return data as T;
-        })
+        .then(response => readJsonResponse<T>(response, url, ttlMs))
         .finally(() => {
           inflightRequests.delete(url);
         });
@@ -47,15 +57,7 @@ export async function fetchJsonCached<T>(
   }
 
   const request = fetch(url)
-    .then(async response => {
-      if (!response.ok) {
-        throw new Error(`Request failed (${response.status}) for ${url}`);
-      }
-
-      const data = await response.json();
-      responseCache.set(url, { data, expiresAt: now + ttlMs });
-      return data as T;
-    })
+    .then(response => readJsonResponse<T>(response, url, ttlMs))
     .finally(() => {
       inflightRequests.delete(url);
     });

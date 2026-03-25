@@ -1,8 +1,9 @@
 'use client';
+
 import { Suspense, startTransition, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
+import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
 import { Card, Button, Spinner, EmptyState } from '@/components/ui';
 import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor, sourceBadgeColor, sourceLabel } from '@/lib/utils';
@@ -39,15 +40,21 @@ function PublicationsPageContent() {
   const [researchers, setResearchers] = useState<{ id: string; canonicalName: string; department: string }[]>([]);
   const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const searchParamsString = searchParams.toString();
-
   const page = Number(searchParams.get('page') || '1');
 
   const setParam = useCallback((updates: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString());
+    const isPageOnlyUpdate = Object.keys(updates).length === 1 && Object.prototype.hasOwnProperty.call(updates, 'page');
+
     Object.entries(updates).forEach(([k, v]) => {
-      if (!v) params.delete(k); else params.set(k, v);
+      if (!v) params.delete(k);
+      else params.set(k, v);
     });
-    params.delete('page');
+
+    if (!isPageOnlyUpdate) {
+      params.delete('page');
+    }
+
     const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
     startTransition(() => {
       router.replace(nextUrl, { scroll: false });
@@ -101,10 +108,11 @@ function PublicationsPageContent() {
     let cancelled = false;
     setLoading(true);
     const params = new URLSearchParams(searchParamsString);
+
     fetchJsonCached<PaginatedResult<PublicationSummary>>(`/api/publications?${params}`)
-      .then(d => {
+      .then(data => {
         if (!cancelled) {
-          setResult(d);
+          setResult(data);
           setLoading(false);
         }
       })
@@ -117,48 +125,56 @@ function PublicationsPageContent() {
     };
   }, [searchParamsString]);
 
-  const verifiedIcon: Record<string, string> = {
-    VERIFIED: '✅', UNVERIFIED: '○', NEEDS_REVIEW: '⚠️', EXCLUDED: '✗'
+  const verifiedLabel: Record<string, string> = {
+    VERIFIED: 'Verified',
+    UNVERIFIED: 'Open',
+    NEEDS_REVIEW: 'Review',
+    EXCLUDED: 'Excluded',
   };
 
   return (
     <PageLayout>
       <TopBar
         title="Publications"
-        subtitle={result ? `${result.total.toLocaleString()} total publications` : 'Loading…'}
+        subtitle={result ? `${result.total.toLocaleString()} total publications` : 'Loading...'}
         actions={
-          <div className="flex items-center gap-2">
+          <TopBarActions>
             <a href={`/api/export?type=publications&${searchParamsString}`}>
-              <Button variant="outline" size="sm">⬇ Export CSV</Button>
+              <Button variant="outline" size="sm">Export CSV</Button>
             </a>
             <Link href="/admin">
               <Button variant="primary" size="sm">+ Add Publication</Button>
             </Link>
-          </div>
+          </TopBarActions>
         }
       />
       <PageContent>
-        {/* Filter bar */}
         <Card className="!p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            {/* Search */}
-            <div className="relative w-full sm:min-w-[220px] sm:flex-1 sm:max-w-xs">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
-              <input value={get('keyword')} onChange={e => setParam({ keyword: e.target.value || null })}
-                placeholder="Search title, abstract, journal…"
-                className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none" />
+            <div className="relative w-full sm:min-w-[220px] sm:max-w-xs sm:flex-1">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400">/</span>
+              <input
+                value={get('keyword')}
+                onChange={e => setParam({ keyword: e.target.value || null })}
+                placeholder="Search title, abstract, journal..."
+                className="w-full rounded-md border border-gray-300 bg-white py-2 pl-8 pr-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
             </div>
 
-            {/* Researcher */}
-            <select value={get('researcherId')} onChange={e => setParam({ researcherId: e.target.value || null })}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:min-w-[160px] sm:w-auto">
+            <select
+              value={get('researcherId')}
+              onChange={e => setParam({ researcherId: e.target.value || null })}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:min-w-[160px] sm:w-auto"
+            >
               <option value="">All Researchers</option>
-              {researchers.map(r => <option key={r.id} value={r.id}>{r.canonicalName}</option>)}
+              {researchers.map(researcher => <option key={researcher.id} value={researcher.id}>{researcher.canonicalName}</option>)}
             </select>
 
-            {/* Department */}
-            <select value={get('department')} onChange={e => setParam({ department: e.target.value || null })}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
+            <select
+              value={get('department')}
+              onChange={e => setParam({ department: e.target.value || null })}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto"
+            >
               <option value="">All Depts</option>
               {departments.map(department => (
                 <option key={department.code} value={department.code}>
@@ -167,174 +183,203 @@ function PublicationsPageContent() {
               ))}
             </select>
 
-            {/* Year range */}
             <div className="flex w-full items-center gap-1.5 sm:w-auto">
-              <input type="number" value={get('yearFrom')} onChange={e => setParam({ yearFrom: e.target.value || null })}
-                placeholder="From year" min={2000} max={2030}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
-              <span className="text-gray-400 text-sm">–</span>
-              <input type="number" value={get('yearTo')} onChange={e => setParam({ yearTo: e.target.value || null })}
-                placeholder="To year" min={2000} max={2030}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
+              <input
+                type="number"
+                value={get('yearFrom')}
+                onChange={e => setParam({ yearFrom: e.target.value || null })}
+                placeholder="From year"
+                min={2000}
+                max={2030}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24"
+              />
+              <span className="text-sm text-gray-400">-</span>
+              <input
+                type="number"
+                value={get('yearTo')}
+                onChange={e => setParam({ yearTo: e.target.value || null })}
+                placeholder="To year"
+                min={2000}
+                max={2030}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24"
+              />
             </div>
 
-            {/* Date range */}
             <div className="flex w-full items-center gap-1.5 sm:w-auto">
-              <input type="date" value={get('dateFrom')} onChange={e => setParam({ dateFrom: e.target.value || null })}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-36" />
-              <span className="text-gray-400 text-sm">-</span>
-              <input type="date" value={get('dateTo')} onChange={e => setParam({ dateTo: e.target.value || null })}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-36" />
+              <input
+                type="date"
+                value={get('dateFrom')}
+                onChange={e => setParam({ dateFrom: e.target.value || null })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-36"
+              />
+              <span className="text-sm text-gray-400">-</span>
+              <input
+                type="date"
+                value={get('dateTo')}
+                onChange={e => setParam({ dateTo: e.target.value || null })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-36"
+              />
             </div>
 
-            {/* Min IF */}
-            <input type="number" value={get('minIF')} onChange={e => setParam({ minIF: e.target.value || null })}
-              placeholder="Min IF" step="0.1" min="0"
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24" />
+            <input
+              type="number"
+              value={get('minIF')}
+              onChange={e => setParam({ minIF: e.target.value || null })}
+              placeholder="Min IF"
+              step="0.1"
+              min="0"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-24"
+            />
 
-            {/* Source */}
-            <select value={get('source')} onChange={e => setParam({ source: e.target.value || null })}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
+            <select
+              value={get('source')}
+              onChange={e => setParam({ source: e.target.value || null })}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto"
+            >
               <option value="">Any Source</option>
-              {SOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {SOURCE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
 
-            {/* Status */}
-            <select value={get('verifiedStatus')} onChange={e => setParam({ verifiedStatus: e.target.value || null })}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
+            <select
+              value={get('verifiedStatus')}
+              onChange={e => setParam({ verifiedStatus: e.target.value || null })}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto"
+            >
               <option value="">Any Status</option>
-              {VERIFIED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {VERIFIED_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
 
-            {/* SLU only toggle */}
-            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none whitespace-nowrap">
-              <input type="checkbox" checked={get('sluOnly') === 'true'}
+            <label className="flex cursor-pointer select-none items-center gap-2 whitespace-nowrap text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={get('sluOnly') === 'true'}
                 onChange={e => setParam({ sluOnly: e.target.checked ? 'true' : null })}
-                className="rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+              />
               SLU tenure only
             </label>
 
-            {/* Clear */}
-            {Array.from(searchParams.keys()).some(k => k !== 'page') && (
-              <button onClick={() => router.replace(pathname, { scroll: false })}
-                className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 px-2 py-2 rounded hover:bg-gray-100">
-                ✕ Clear
+            {Array.from(searchParams.keys()).some(key => key !== 'page') && (
+              <button
+                onClick={() => router.replace(pathname, { scroll: false })}
+                className="flex items-center gap-1 rounded px-2 py-2 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              >
+                x Clear
               </button>
             )}
           </div>
 
-          {/* Active filter pills */}
           {get('sluOnly') === 'true' && (
             <div className="mt-3 flex gap-2">
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-brand-50 text-brand-700 border border-brand-200">
-                📅 SLU tenure filter active — pre-tenure publications hidden
-                <button onClick={() => setParam({ sluOnly: null })} className="ml-1 hover:text-brand-900">✕</button>
+              <span className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-xs text-brand-700">
+                SLU tenure filter active - pre-tenure publications hidden
+                <button onClick={() => setParam({ sluOnly: null })} className="ml-1 hover:text-brand-900">x</button>
               </span>
             </div>
           )}
         </Card>
 
-        {/* Table */}
         {loading ? (
           <div className="flex justify-center py-16"><Spinner size="lg" /></div>
         ) : !result?.data.length ? (
-          <EmptyState icon="📄" title="No publications found"
-            description="Try adjusting your filters or add publications through the admin panel." />
+          <EmptyState
+            icon="P"
+            title="No publications found"
+            description="Try adjusting your filters or add publications through the admin panel."
+          />
         ) : (
           <Card padding={false}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/60">
-                    {['Title', 'Authors / Researchers', 'Journal', 'Year', 'IF', 'Citations', 'Source', 'Status', 'SLU', ''].map((h, i) => (
-                      <th key={i} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${i >= 3 ? 'text-right' : 'text-left'} whitespace-nowrap`}>
-                        {h}
+                    {['Title', 'Authors / Researchers', 'Journal', 'Year', 'IF', 'Citations', 'Source', 'Status', 'SLU', ''].map((header, index) => (
+                      <th
+                        key={header}
+                        className={`whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${index >= 3 ? 'text-right' : 'text-left'}`}
+                      >
+                        {header}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {result.data.map(pub => (
-                    <tr key={pub.id} className="hover:bg-gray-50/60 transition-colors group">
-                      {/* Title */}
-                      <td className="px-4 py-3 max-w-xs">
-                        <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">{pub.title}</p>
-                        {pub.doi && (
-                          <p className="text-[10px] text-gray-400 font-mono mt-0.5 truncate">{pub.doi}</p>
+                  {result.data.map(publication => (
+                    <tr key={publication.id} className="group transition-colors hover:bg-gray-50/60">
+                      <td className="max-w-xs px-4 py-3">
+                        <p className="line-clamp-2 text-sm font-medium leading-snug text-gray-900">{publication.title}</p>
+                        {publication.doi && (
+                          <p className="mt-0.5 truncate font-mono text-[10px] text-gray-400">{publication.doi}</p>
                         )}
-                        {pub.specialties.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {pub.specialties.slice(0, 2).map(s => (
-                              <span key={s} className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-500">{s}</span>
+                        {publication.specialties.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {publication.specialties.slice(0, 2).map(specialty => (
+                              <span key={specialty} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{specialty}</span>
                             ))}
                           </div>
                         )}
                       </td>
 
-                      {/* Authors / Researchers */}
-                      <td className="px-4 py-3 max-w-[180px]">
-                        <p className="text-xs text-gray-600 truncate">{pub.authors.slice(0, 3).join(', ')}{pub.authors.length > 3 ? ' et al.' : ''}</p>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {pub.matchedResearchers.slice(0, 2).map(r => (
-                            <Link key={r.id} href={`/researchers/${r.id}`}>
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer hover:opacity-80 ${departmentColor(r.department)}`}>
-                                {r.name.split(' ').slice(-1)[0]}
+                      <td className="max-w-[180px] px-4 py-3">
+                        <p className="truncate text-xs text-gray-600">
+                          {publication.authors.slice(0, 3).join(', ')}
+                          {publication.authors.length > 3 ? ' et al.' : ''}
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {publication.matchedResearchers.slice(0, 2).map(researcher => (
+                            <Link key={researcher.id} href={`/researchers/${researcher.id}`}>
+                              <span className={`cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80 ${departmentColor(researcher.department)}`}>
+                                {researcher.name.split(' ').slice(-1)[0]}
                               </span>
                             </Link>
                           ))}
                         </div>
                       </td>
 
-                      {/* Journal */}
-                      <td className="px-4 py-3 max-w-[160px]">
-                        <p className="text-xs text-gray-600 truncate">{pub.journalName || '—'}</p>
+                      <td className="max-w-[160px] px-4 py-3">
+                        <p className="truncate text-xs text-gray-600">{publication.journalName || '-'}</p>
                       </td>
 
-                      {/* Year */}
                       <td className="px-4 py-3 text-right">
-                        <span className="text-sm text-gray-700 font-mono">{pub.publicationYear ?? '—'}</span>
+                        <span className="font-mono text-sm text-gray-700">{publication.publicationYear ?? '-'}</span>
                       </td>
 
-                      {/* IF */}
                       <td className="px-4 py-3 text-right">
-                        {pub.impactFactor != null ? (
-                          <span className={`text-xs font-medium ${pub.impactFactor >= 10 ? 'text-amber-600' : pub.impactFactor >= 5 ? 'text-green-600' : 'text-gray-500'}`}>
-                            {pub.impactFactor.toFixed(1)}
+                        {publication.impactFactor != null ? (
+                          <span className={`text-xs font-medium ${publication.impactFactor >= 10 ? 'text-amber-600' : publication.impactFactor >= 5 ? 'text-green-600' : 'text-gray-500'}`}>
+                            {publication.impactFactor.toFixed(1)}
                           </span>
-                        ) : <span className="text-xs text-gray-300">—</span>}
+                        ) : (
+                          <span className="text-xs text-gray-300">-</span>
+                        )}
                       </td>
 
-                      {/* Citations */}
                       <td className="px-4 py-3 text-right">
-                        <span className="text-sm font-bold text-brand-700">{pub.latestCitations.toLocaleString()}</span>
+                        <span className="text-sm font-bold text-brand-700">{publication.latestCitations.toLocaleString()}</span>
                       </td>
 
-                      {/* Source badge */}
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${sourceBadgeColor(pub.sourcePrimary)}`}>
-                          {sourceLabel(pub.sourcePrimary)}
+                        <span className={`rounded border px-2 py-0.5 text-[10px] font-medium ${sourceBadgeColor(publication.sourcePrimary)}`}>
+                          {sourceLabel(publication.sourcePrimary)}
                         </span>
                       </td>
 
-                      {/* Status */}
                       <td className="px-4 py-3 text-right">
-                        <span title={pub.verifiedStatus} className="text-sm">
-                          {verifiedIcon[pub.verifiedStatus] || '○'}
+                        <span title={publication.verifiedStatus} className="text-xs font-medium text-gray-700">
+                          {verifiedLabel[publication.verifiedStatus] || 'Open'}
                         </span>
                       </td>
 
-                      {/* SLU */}
                       <td className="px-4 py-3 text-right">
-                        <span className={`text-xs font-medium ${pub.includedInSluOutput ? 'text-green-600' : 'text-gray-400'}`}>
-                          {pub.includedInSluOutput ? '✓' : '○'}
+                        <span className={`text-xs font-medium ${publication.includedInSluOutput ? 'text-green-600' : 'text-gray-400'}`}>
+                          {publication.includedInSluOutput ? 'Included' : 'Excluded'}
                         </span>
                       </td>
 
-                      {/* Actions */}
                       <td className="px-4 py-3">
-                        <Link href={`/publications/${pub.id}`}>
-                          <Button variant="outline" size="xs" className="opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            View →
+                        <Link href={`/publications/${publication.id}`}>
+                          <Button variant="outline" size="xs" className="whitespace-nowrap opacity-0 transition-opacity group-hover:opacity-100">
+                            View
                           </Button>
                         </Link>
                       </td>
@@ -344,26 +389,32 @@ function PublicationsPageContent() {
               </table>
             </div>
 
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/40">
+            <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50/40 px-4 py-3">
               <p className="text-xs text-gray-500">
-                Showing {((page - 1) * 25) + 1}–{Math.min(page * 25, result.total)} of {result.total.toLocaleString()} results
+                Showing {((page - 1) * 25) + 1}-{Math.min(page * 25, result.total)} of {result.total.toLocaleString()} results
               </p>
               <div className="flex items-center gap-1">
-                <Button variant="outline" size="xs" disabled={page <= 1}
-                  onClick={() => setParam({ page: String(page - 1) })}>← Prev</Button>
-                {Array.from({ length: Math.min(result.totalPages, 7) }, (_, i) => {
-                  const p = i + 1;
+                <Button variant="outline" size="xs" disabled={page <= 1} onClick={() => setParam({ page: String(page - 1) })}>
+                  Prev
+                </Button>
+                {Array.from({ length: Math.min(result.totalPages, 7) }, (_, index) => {
+                  const nextPage = index + 1;
                   return (
-                    <button key={p} onClick={() => setParam({ page: String(p) })}
-                      className={`w-7 h-7 text-xs rounded flex items-center justify-center font-medium transition-colors ${
-                        p === page ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-                      }`}>{p}</button>
+                    <button
+                      key={nextPage}
+                      onClick={() => setParam({ page: String(nextPage) })}
+                      className={`flex h-7 w-7 items-center justify-center rounded text-xs font-medium transition-colors ${
+                        nextPage === page ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {nextPage}
+                    </button>
                   );
                 })}
-                {result.totalPages > 7 && <span className="text-gray-400 text-xs px-1">…</span>}
-                <Button variant="outline" size="xs" disabled={page >= result.totalPages}
-                  onClick={() => setParam({ page: String(page + 1) })}>Next →</Button>
+                {result.totalPages > 7 && <span className="px-1 text-xs text-gray-400">...</span>}
+                <Button variant="outline" size="xs" disabled={page >= result.totalPages} onClick={() => setParam({ page: String(page + 1) })}>
+                  Next
+                </Button>
               </div>
             </div>
           </Card>

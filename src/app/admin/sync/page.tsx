@@ -11,6 +11,76 @@ const SOURCES = ['CROSSREF', 'PUBMED', 'ORCID', 'GOOGLE_SCHOLAR'];
 type MessageTone = 'success' | 'warning' | 'error';
 type SourceConfig = Record<string, { configured: boolean; reason?: string }>;
 
+function summarizeSourceError(source: string, message: string) {
+  const trimmed = message.trim();
+  const researcherMatch = trimmed.match(/^([^:|]+):\s*(.+)$/);
+  const researcher = researcherMatch?.[1]?.trim();
+  const detail = (researcherMatch?.[2] || trimmed).trim();
+  const labelPrefix = researcher ? `${researcher}: ` : '';
+
+  if (detail.includes('NCBI PubMed rate limit reached') || detail.includes('Request failed (429)')) {
+    return `${labelPrefix}PubMed rate limit reached. Wait a minute and retry${
+      detail.includes('NCBI_API_KEY') ? ', or add NCBI_API_KEY to .env.local' : ''
+    }.`;
+  }
+
+  if (detail.includes('Request failed (500)')) {
+    if (source === 'PUBMED') {
+      return `${labelPrefix}PubMed returned a server error while fetching publications. Retry in a few minutes.`;
+    }
+
+    if (source === 'CROSSREF') {
+      return `${labelPrefix}CrossRef returned a server error while fetching publications. Retry in a few minutes.`;
+    }
+
+    if (source === 'ORCID') {
+      return `${labelPrefix}ORCID returned a server error while fetching works. Retry in a few minutes.`;
+    }
+
+    if (source === 'GOOGLE_SCHOLAR') {
+      return `${labelPrefix}Google Scholar sync returned a server error through SerpAPI. Retry in a few minutes.`;
+    }
+  }
+
+  if (detail.includes('SERPAPI_KEY is not configured')) {
+    return 'Google Scholar sync is not configured. Add SERPAPI_KEY to .env.local first.';
+  }
+
+  if (detail.includes('No active researchers available for sync')) {
+    return 'No active researchers are available to sync.';
+  }
+
+  if (detail.includes('does not have automatic ingestion wired into the platform')) {
+    return `${sourceLabel(source)} does not support automatic sync in this app yet.`;
+  }
+
+  if (detail.includes('Request failed (403)')) {
+    return `${labelPrefix}${sourceLabel(source)} rejected the request. Check API configuration and permissions.`;
+  }
+
+  if (detail.includes('Request failed (404)')) {
+    return `${labelPrefix}${sourceLabel(source)} could not find the requested researcher or record.`;
+  }
+
+  return `${labelPrefix}${detail.replace(/\s+for\s+https?:\/\/\S+$/i, '')}`;
+}
+
+function summarizeJobError(source: string, errorMessage?: string | null) {
+  if (!errorMessage) return null;
+
+  const parts = errorMessage
+    .split(' | ')
+    .map(part => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return null;
+
+  const summarized = parts.map(part => summarizeSourceError(source, part));
+  if (summarized.length === 1) return summarized[0];
+
+  return `${summarized[0]} (${summarized.length - 1} more issue${summarized.length > 2 ? 's' : ''} in this run.)`;
+}
+
 export default function AdminSyncPage() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [sourceConfig, setSourceConfig] = useState<SourceConfig>({});
@@ -48,19 +118,20 @@ export default function AdminSyncPage() {
       if (!response.ok) {
         setMessage({
           type: 'error',
-          text: result.error || `${sourceLabel(source)} sync failed.`,
+          text: summarizeJobError(source, result.error) || `${sourceLabel(source)} sync failed.`,
         });
       } else if (result.status === 'FAILED') {
         setMessage({
           type: 'error',
-          text: result.errorMessage || `${sourceLabel(source)} sync failed.`,
+          text: summarizeJobError(source, result.errorMessage) || `${sourceLabel(source)} sync failed.`,
         });
       } else if (result.status === 'PARTIAL') {
         setMessage({
           type: 'warning',
           text:
             `${sourceLabel(source)} sync completed with some skipped records: ` +
-            `${result.recordsFound ?? 0} found, ${result.recordsCreated ?? 0} new, ${result.recordsUpdated ?? 0} updated.`,
+            `${result.recordsFound ?? 0} found, ${result.recordsCreated ?? 0} new, ${result.recordsUpdated ?? 0} updated.` +
+            `${result.errorMessage ? ` ${summarizeJobError(source, result.errorMessage)}` : ''}`,
         });
       } else {
         setMessage({
@@ -205,7 +276,11 @@ export default function AdminSyncPage() {
                       <td className="px-4 py-3 text-xs text-brand-700 font-medium">{job.recordsUpdated ?? '--'}</td>
                       <td className="px-4 py-3 text-xs text-gray-400">{job.triggeredBy || 'system'}</td>
                       <td className="px-4 py-3 max-w-xs">
-                        {job.errorMessage && <p className="text-xs text-red-600 truncate">{job.errorMessage}</p>}
+                        {job.errorMessage && (
+                          <p title={summarizeJobError(job.source, job.errorMessage) || job.errorMessage} className="text-xs text-red-600">
+                            {summarizeJobError(job.source, job.errorMessage)}
+                          </p>
+                        )}
                       </td>
                     </tr>
                   ))}

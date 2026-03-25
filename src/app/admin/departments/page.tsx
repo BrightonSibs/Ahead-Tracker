@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
+import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Input, Alert, Spinner } from '@/components/ui';
 import type { DepartmentSummary } from '@/types';
 
@@ -141,9 +141,11 @@ export default function AdminDepartmentsPage() {
         title="Departments"
         subtitle="Manage department codes, labels, colors, and availability across the platform"
         actions={
-          <Button variant="primary" size="sm" onClick={() => setShowAddForm(current => !current)}>
-            {showAddForm ? 'Cancel' : '+ Add Department'}
-          </Button>
+          <TopBarActions>
+            <Button variant="primary" size="sm" onClick={() => setShowAddForm(current => !current)}>
+              {showAddForm ? 'Cancel' : '+ Add Department'}
+            </Button>
+          </TopBarActions>
         }
       />
       <PageContent>

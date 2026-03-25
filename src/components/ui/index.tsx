@@ -323,31 +323,35 @@ export function Toggle({
   checked,
   onChange,
   label,
+  className,
+  labelClassName,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label?: string;
+  className?: string;
+  labelClassName?: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 select-none">
+    <label className={cn('flex cursor-pointer items-center gap-3 select-none', className)}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={cn(
-          'relative inline-flex h-5 w-11 items-center border bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-brand-200',
-          checked ? 'border-brand-700' : 'border-gray-400',
+          'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-brand-200',
+          checked ? 'border-brand-700 bg-brand-700' : 'border-gray-300 bg-gray-200',
         )}
       >
         <span
           className={cn(
-            'inline-block h-3 w-3 transform transition-transform',
-            checked ? 'translate-x-6 bg-brand-700' : 'translate-x-1 bg-gray-500',
+            'inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+            checked ? 'translate-x-5' : 'translate-x-1',
           )}
         />
       </button>
-      {label && <span className="text-sm font-semibold text-gray-800">{label}</span>}
+      {label && <span className={cn('text-sm font-semibold text-gray-800', labelClassName)}>{label}</span>}
     </label>
   );
 }

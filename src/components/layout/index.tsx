@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { ReactNode, useEffect, useState } from 'react';
 import { SluShield } from '@/components/branding/slu-shield';
-import { warmJsonCache } from '@/lib/client-cache';
+import { invalidateJsonCache, warmJsonCache } from '@/lib/client-cache';
 import { cn } from '@/lib/utils';
 
 const NAV = [
@@ -39,6 +39,8 @@ const NAV_DATA_PREFETCH: Record<string, string[]> = {
   '/admin/sync': ['/api/admin/sync', '/api/admin/sync/config'],
   '/admin/journals': ['/api/journals'],
 };
+
+const PREFETCH_ROUTES = [...NAV, ...ADMIN_NAV];
 
 function NavItem({
   href,
@@ -92,13 +94,20 @@ function NavItem({
 }
 
 function SidebarContent({
+  session,
+  signingOut,
+  onSignOut,
+  onNavigateToPassword,
   onNavigate,
   onStartNavigate,
 }: {
+  session: any;
+  signingOut?: boolean;
+  onSignOut?: () => void;
+  onNavigateToPassword?: () => void;
   onNavigate?: () => void;
   onStartNavigate?: () => void;
 }) {
-  const { data: session } = useSession();
   const isAdmin = (session?.user as any)?.role === 'ADMIN';
   const isAnalyst = (session?.user as any)?.role === 'ANALYST';
 
@@ -139,13 +148,28 @@ function SidebarContent({
             <p className="truncate text-sm font-semibold text-white">{session?.user?.name || 'User'}</p>
             <p className="truncate text-[10px] uppercase tracking-[0.12em] text-brand-200">{(session?.user as any)?.role?.toLowerCase() || 'viewer'}</p>
           </div>
-          <button
-            onClick={() => signOut({ callbackUrl: '/login' })}
-            className="flex-shrink-0 px-2 py-1 text-sm text-brand-100 transition-colors hover:bg-brand-800 hover:text-white"
-            title="Sign out"
-          >
-            Out
-          </button>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            <Link
+              href="/account/password"
+              onClick={() => {
+                onStartNavigate?.();
+                onNavigateToPassword?.();
+                onNavigate?.();
+              }}
+              className="px-2 py-1 text-sm text-brand-100 transition-colors hover:bg-brand-800 hover:text-white"
+              title="Change password"
+            >
+              Password
+            </Link>
+            <button
+              onClick={onSignOut}
+              disabled={signingOut}
+              className="px-2 py-1 text-sm text-brand-100 transition-colors hover:bg-brand-800 hover:text-white disabled:opacity-60"
+              title="Sign out"
+            >
+              {signingOut ? '...' : 'Out'}
+            </button>
+          </div>
         </div>
       </div>
     </>
@@ -153,18 +177,28 @@ function SidebarContent({
 }
 
 export function Sidebar() {
+  const { data: session } = useSession();
+
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-brand-900 bg-brand-700 md:flex">
-      <SidebarContent />
+      <SidebarContent session={session} />
     </aside>
   );
 }
 
 function MobileSidebar({
+  session,
+  signingOut,
+  onSignOut,
+  onNavigateToPassword,
   open,
   onClose,
   onStartNavigate,
 }: {
+  session: any;
+  signingOut?: boolean;
+  onSignOut?: () => void;
+  onNavigateToPassword?: () => void;
   open: boolean;
   onClose: () => void;
   onStartNavigate?: () => void;
@@ -199,7 +233,14 @@ function MobileSidebar({
             Close
           </button>
         </div>
-        <SidebarContent onNavigate={onClose} onStartNavigate={onStartNavigate} />
+        <SidebarContent
+          session={session}
+          signingOut={signingOut}
+          onSignOut={onSignOut}
+          onNavigateToPassword={onNavigateToPassword}
+          onNavigate={onClose}
+          onStartNavigate={onStartNavigate}
+        />
       </aside>
     </div>
   );
@@ -238,14 +279,140 @@ export function TopBar({ title, subtitle, actions }: { title: string; subtitle?:
   );
 }
 
+export function TopBarActions({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        'flex w-full flex-col gap-2 [&>*]:w-full sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:[&>*]:w-auto',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function TopBarSelect({
+  className,
+  children,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      className={cn(
+        'min-h-[40px] min-w-[12rem] rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 outline-none transition-colors focus:border-brand-700 focus:ring-2 focus:ring-brand-100',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </select>
+  );
+}
+
 export function PageLayout({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { data: session, status } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navigating, setNavigating] = useState(false);
-  const pathname = usePathname();
+  const [signingOut, setSigningOut] = useState(false);
+  const role = (session?.user as any)?.role;
+  const isAuthenticated = status === 'authenticated' && !!session;
 
   useEffect(() => {
     setNavigating(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (status !== 'unauthenticated') return;
+
+    setNavigating(true);
+    router.replace('/login');
+  }, [router, status]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const routes = PREFETCH_ROUTES.filter(route => {
+      if (!route.href.startsWith('/admin')) return true;
+      return role === 'ADMIN' || role === 'ANALYST';
+    });
+
+    const warmRoutes = () => {
+      routes.forEach(route => {
+        router.prefetch(route.href);
+      });
+    };
+
+    const warmData = () => {
+      warmJsonCache([
+        '/api/analytics?type=dashboard&sluOnly=false',
+        '/api/researchers',
+        '/api/departments',
+        '/api/publications',
+      ], 45_000);
+    };
+
+    const requestIdle = globalThis.requestIdleCallback;
+
+    if (requestIdle) {
+      const idleId = requestIdle(() => {
+        warmRoutes();
+        warmData();
+      });
+
+      return () => globalThis.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      warmRoutes();
+      warmData();
+    }, 150);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isAuthenticated, role, router]);
+
+  useEffect(() => {
+    const onAuthError = () => {
+      setMobileOpen(false);
+      setNavigating(true);
+      router.replace('/login');
+    };
+
+    window.addEventListener('ahead:auth-error', onAuthError);
+    return () => window.removeEventListener('ahead:auth-error', onAuthError);
+  }, [router]);
+
+  async function handleSignOut() {
+    if (signingOut) return;
+
+    try {
+      setSigningOut(true);
+      setNavigating(true);
+      setMobileOpen(false);
+      invalidateJsonCache();
+
+      const result = await signOut({ redirect: false, callbackUrl: '/login' });
+      router.replace(result?.url || '/login');
+      router.refresh();
+    } catch {
+      window.location.href = '/login';
+    }
+  }
+
+  if (status === 'loading' || !isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="flex items-center gap-3 border border-brand-200 bg-white px-4 py-3 shadow-card">
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-brand-700 border-t-transparent" />
+          <span className="text-sm font-semibold text-brand-900">
+            {signingOut || status === 'unauthenticated' ? 'Returning to sign in...' : 'Loading your workspace...'}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -257,9 +424,23 @@ export function PageLayout({ children }: { children: ReactNode }) {
       />
       <MobileHeader onMenu={() => setMobileOpen(true)} />
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-brand-900 bg-brand-700 md:flex">
-        <SidebarContent onStartNavigate={() => setNavigating(true)} />
+        <SidebarContent
+          session={session}
+          signingOut={signingOut}
+          onSignOut={handleSignOut}
+          onNavigateToPassword={() => setNavigating(true)}
+          onStartNavigate={() => setNavigating(true)}
+        />
       </aside>
-      <MobileSidebar open={mobileOpen} onClose={() => setMobileOpen(false)} onStartNavigate={() => setNavigating(true)} />
+      <MobileSidebar
+        session={session}
+        signingOut={signingOut}
+        onSignOut={handleSignOut}
+        onNavigateToPassword={() => setNavigating(true)}
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        onStartNavigate={() => setNavigating(true)}
+      />
       <div className="flex min-h-screen flex-col md:pl-64">
         {children}
       </div>
@@ -270,6 +451,7 @@ export function PageLayout({ children }: { children: ReactNode }) {
 export function PageContent({ children, className }: { children: ReactNode; className?: string }) {
   return <main className={cn('mx-auto flex-1 w-full space-y-5 p-4 md:max-w-screen-2xl md:p-6', className)}>{children}</main>;
 }
+
 function SluWordmark({ compact = false }: { compact?: boolean }) {
   return (
     <div className="min-w-0">

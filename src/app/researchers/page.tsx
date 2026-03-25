@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
+import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
 import { Card, Button, Spinner, EmptyState, ProgressBar, KpiCard } from '@/components/ui';
 import { FilterBar } from '@/components/filters';
 import { fetchJsonCached } from '@/lib/client-cache';
@@ -88,9 +88,11 @@ function ResearchersPageContent() {
         title="Researchers"
         subtitle={`${researchers.length} faculty members across ${representedDepartments.length || 0} departments`}
         actions={
-          <a href="/api/export?type=researchers">
-            <Button variant="outline" size="sm">Export CSV</Button>
-          </a>
+          <TopBarActions>
+            <a href="/api/export?type=researchers">
+              <Button variant="outline" size="sm">Export CSV</Button>
+            </a>
+          </TopBarActions>
         }
       />
       <PageContent>
@@ -126,6 +128,10 @@ function ResearchersPageContent() {
           <EmptyState icon="R" title="No researchers found" description="Try adjusting your search or filter." />
         ) : (
           <Card padding={false}>
+            <div className="border-b border-gray-100 bg-gray-50/40 px-4 py-3 text-xs text-gray-600">
+              Profile completeness reflects how complete each researcher record is.
+              It is based on name, ORCID, SLU start date, aliases, and specialties.
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -138,7 +144,12 @@ function ResearchersPageContent() {
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Citations</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">h-index</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aliases</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Completeness</th>
+                    <th
+                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                      title="Based on profile fields present: name, ORCID, SLU start date, aliases, and specialties."
+                    >
+                      Profile Completeness
+                    </th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>

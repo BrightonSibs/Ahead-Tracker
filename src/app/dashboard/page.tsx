@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
-import { Card, CardHeader, CardTitle, KpiCard, Button, Alert, Skeleton } from '@/components/ui';
-import { CitationTrendChart, DeptPieChart } from '@/components/charts';
+import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
+import { Card, CardHeader, CardTitle, KpiCard, Button, Alert, Skeleton, Toggle } from '@/components/ui';
+import { CitationTrendChart, DeptPieChart } from '@/components/charts/lazy';
 import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentDotColor, departmentColor, formatDate, sourceLabel } from '@/lib/utils';
 
@@ -59,20 +59,12 @@ export default function DashboardPage() {
         title="Dashboard"
         subtitle="Research output overview across tracked departments"
         actions={
-          <div className="flex items-center gap-3">
-            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600">
-              <input
-                type="checkbox"
-                checked={sluOnly}
-                onChange={event => setSluOnly(event.target.checked)}
-                className="border-gray-300 text-brand-700 focus:ring-brand-200"
-              />
-              SLU tenure only
-            </label>
+          <TopBarActions>
+            <Toggle checked={sluOnly} onChange={setSluOnly} label="SLU tenure only" />
             <Link href="/reports">
               <Button variant="outline" size="sm">Export Report</Button>
             </Link>
-          </div>
+          </TopBarActions>
         }
       />
 

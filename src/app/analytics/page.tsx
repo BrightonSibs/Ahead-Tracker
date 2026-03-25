@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
+import { PageLayout, PageContent, TopBar, TopBarActions, TopBarSelect } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Spinner, Tabs, Toggle, KpiCard } from '@/components/ui';
 import {
   CitationTrendChart,
@@ -10,7 +10,7 @@ import {
   SpecialtyBarChart,
   ImpactFactorChart,
   DeptPieChart,
-} from '@/components/charts';
+} from '@/components/charts/lazy';
 import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor } from '@/lib/utils';
 import type { DepartmentSummary } from '@/types';
@@ -85,12 +85,11 @@ export default function AnalyticsPage() {
         title="Analytics"
         subtitle="Research output and citation analysis across departments"
         actions={
-          <div className="flex items-center gap-3">
+          <TopBarActions>
             <Toggle checked={sluOnly} onChange={setSluOnly} label="SLU tenure only" />
-            <select
+            <TopBarSelect
               value={dept}
               onChange={e => setDept(e.target.value)}
-              className="border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-700"
             >
               <option value="">All Departments</option>
               {departments.map(department => (
@@ -98,11 +97,11 @@ export default function AnalyticsPage() {
                   {department.shortName || department.name}
                 </option>
               ))}
-            </select>
+            </TopBarSelect>
             <a href={`/api/export?type=researchers${dept ? `&department=${dept}` : ''}`}>
               <Button variant="outline" size="sm">Export</Button>
             </a>
-          </div>
+          </TopBarActions>
         }
       />
 

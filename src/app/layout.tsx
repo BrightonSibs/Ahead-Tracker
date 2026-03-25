@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { Crimson_Pro, Archivo_Narrow, IBM_Plex_Mono } from 'next/font/google';
+import { getServerSession } from 'next-auth';
 import './globals.css';
 import { Providers } from './providers';
+import { authOptions } from '@/lib/auth';
 
 const crimson = Crimson_Pro({
   subsets: ['latin'],
@@ -31,11 +33,13 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getServerSession(authOptions);
+
   return (
     <html lang="en" className={`${crimson.variable} ${archivo.variable} ${mono.variable}`}>
       <body className="font-body bg-gray-50 text-gray-900 antialiased">
-        <Providers>{children}</Providers>
+        <Providers session={session}>{children}</Providers>
       </body>
     </html>
   );

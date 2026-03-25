@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
+import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Spinner, StatRow, Tabs, Toggle, Alert } from '@/components/ui';
-import { CitationTrendChart } from '@/components/charts';
+import { CitationTrendChart } from '@/components/charts/lazy';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import { departmentColor, confidenceBadgeColor, confidenceLabel } from '@/lib/utils';
 
@@ -125,7 +125,7 @@ export default function ResearcherProfilePage() {
         title={researcher.canonicalName}
         subtitle={`Faculty ID ${researcher.facultyId} | ${researcher.department}`}
         actions={
-          <div className="flex items-center gap-2">
+          <TopBarActions>
             <Toggle checked={sluOnly} onChange={setSluOnly} label="SLU tenure only" />
             <a href={`/api/export?type=publications&researcherId=${id}&sluOnly=${sluOnly}`}>
               <Button variant="outline" size="sm">Export</Button>
@@ -133,7 +133,7 @@ export default function ResearcherProfilePage() {
             <Link href="/researchers">
               <Button variant="ghost" size="sm">Back</Button>
             </Link>
-          </div>
+          </TopBarActions>
         }
       />
       <PageContent>

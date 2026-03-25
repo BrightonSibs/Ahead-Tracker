@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { PageLayout, PageContent, TopBar } from '@/components/layout';
+import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Spinner, Alert, StatRow } from '@/components/ui';
-import { CitationTrendChart } from '@/components/charts';
+import { CitationTrendChart } from '@/components/charts/lazy';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import {
   confidenceBadgeColor,
@@ -260,14 +260,14 @@ export default function PublicationDetailPage() {
         title={pub.title?.length > 60 ? `${pub.title.slice(0, 60)}...` : pub.title}
         subtitle={`${pub.journalName || 'Unknown journal'} | ${pub.publicationYear || '-'}`}
         actions={
-          <div className="flex items-center gap-2">
+          <TopBarActions>
             <a href="/api/export?type=publications">
               <Button variant="outline" size="sm">Export</Button>
             </a>
             <Link href="/publications">
               <Button variant="ghost" size="sm">Back</Button>
             </Link>
-          </div>
+          </TopBarActions>
         }
       />
       <PageContent>

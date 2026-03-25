@@ -28,6 +28,7 @@ export default function LoginPage() {
     if (session) {
       setRedirecting(true);
       router.replace('/dashboard');
+      router.refresh();
     }
   }, [router, session]);
 
@@ -42,7 +43,8 @@ export default function LoginPage() {
 
     if (result?.ok) {
       setRedirecting(true);
-      router.replace('/dashboard');
+      router.replace(result.url || '/dashboard');
+      router.refresh();
     } else if (!result?.error || result.error === 'CredentialsSignin') {
       setError('Invalid email or password.');
     } else if (process.env.NODE_ENV === 'development') {
@@ -107,7 +109,7 @@ export default function LoginPage() {
               onChange={e => setPassword(e.target.value)}
               placeholder="********"
             />
-            <Button type="submit" className="w-full" loading={loading}>
+            <Button type="submit" className="w-full" loading={loading} disabled={authPending}>
               Sign In
             </Button>
           </form>
@@ -123,11 +125,12 @@ export default function LoginPage() {
                 <button
                   key={credential.label}
                   type="button"
+                  disabled={authPending}
                   onClick={() => {
                     setEmail(credential.email);
                     setPassword(credential.pwd);
                   }}
-                  className="group flex w-full items-center justify-between border border-brand-100 bg-white px-3 py-1.5 text-left transition-colors hover:bg-brand-50"
+                  className="group flex w-full items-center justify-between border border-brand-100 bg-white px-3 py-1.5 text-left transition-colors hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="text-xs font-semibold text-gray-900 group-hover:text-brand-700">{credential.label}</span>
                   <span className="font-mono text-xs font-semibold text-gray-600">{credential.email}</span>
