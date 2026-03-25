@@ -77,10 +77,10 @@ export function isTenureInclusive(
 }
 
 export function confidenceBadgeColor(confidence: number): string {
-  if (confidence >= 0.95) return 'bg-green-100 text-green-800';
-  if (confidence >= 0.80) return 'bg-blue-100 text-blue-800';
-  if (confidence >= 0.60) return 'bg-yellow-100 text-yellow-800';
-  return 'bg-red-100 text-red-800';
+  if (confidence >= 0.95) return 'border border-brand-200 bg-brand-50 text-brand-800';
+  if (confidence >= 0.80) return 'border border-gray-300 bg-white text-gray-800';
+  if (confidence >= 0.60) return 'border border-gray-300 bg-gray-50 text-gray-700';
+  return 'border border-red-200 bg-white text-red-800';
 }
 
 export function confidenceLabel(confidence: number): string {
@@ -90,20 +90,65 @@ export function confidenceLabel(confidence: number): string {
   return 'Low';
 }
 
+const DEPARTMENT_BADGE_CLASSES = [
+  'border border-brand-200 bg-brand-50 text-brand-800',
+  'border border-teal-200 bg-teal-50 text-teal-800',
+  'border border-slate-300 bg-slate-50 text-slate-700',
+  'border border-zinc-300 bg-zinc-50 text-zinc-700',
+  'border border-stone-300 bg-stone-50 text-stone-700',
+  'border border-neutral-300 bg-neutral-50 text-neutral-700',
+  'border border-blue-200 bg-blue-50 text-blue-800',
+  'border border-slate-400 bg-white text-slate-800',
+];
+
+const DEPARTMENT_DOT_CLASSES = [
+  'bg-brand-600',
+  'bg-teal-500',
+  'bg-slate-600',
+  'bg-zinc-600',
+  'bg-stone-600',
+  'bg-neutral-600',
+  'bg-blue-500',
+  'bg-slate-400',
+];
+
+const DEPARTMENT_HEX_COLORS = [
+  '#003DA5',
+  '#14B8A6',
+  '#64748B',
+  '#71717A',
+  '#78716C',
+  '#525252',
+  '#60A5FA',
+  '#9CA3AF',
+];
+
+function hashDepartment(dept: string) {
+  return dept.split('').reduce((hash, char) => hash + char.charCodeAt(0), 0);
+}
+
 export function departmentColor(dept: string): string {
   const colors: Record<string, string> = {
-    AHEAD: 'bg-brand-100 text-brand-800',
-    HCOR: 'bg-teal-100 text-teal-800',
+    AHEAD: 'border border-brand-200 bg-brand-50 text-brand-800',
+    HCOR: 'border border-teal-200 bg-teal-50 text-teal-800',
   };
-  return colors[dept] || 'bg-gray-100 text-gray-700';
+  return colors[dept] || DEPARTMENT_BADGE_CLASSES[hashDepartment(dept) % DEPARTMENT_BADGE_CLASSES.length];
 }
 
 export function departmentDotColor(dept: string): string {
   const colors: Record<string, string> = {
-    AHEAD: 'bg-brand-500',
+    AHEAD: 'bg-brand-600',
     HCOR: 'bg-teal-500',
   };
-  return colors[dept] || 'bg-gray-400';
+  return colors[dept] || DEPARTMENT_DOT_CLASSES[hashDepartment(dept) % DEPARTMENT_DOT_CLASSES.length];
+}
+
+export function departmentHexColor(dept: string): string {
+  const colors: Record<string, string> = {
+    AHEAD: '#003DA5',
+    HCOR: '#14B8A6',
+  };
+  return colors[dept] || DEPARTMENT_HEX_COLORS[hashDepartment(dept) % DEPARTMENT_HEX_COLORS.length];
 }
 
 export function sourceLabel(source: string): string {
@@ -121,13 +166,13 @@ export function sourceLabel(source: string): string {
 
 export function sourceBadgeColor(source: string): string {
   const colors: Record<string, string> = {
-    GOOGLE_SCHOLAR: 'bg-blue-50 text-blue-700 border-blue-200',
-    CROSSREF: 'bg-orange-50 text-orange-700 border-orange-200',
-    ORCID: 'bg-green-50 text-green-700 border-green-200',
-    PUBMED: 'bg-purple-50 text-purple-700 border-purple-200',
-    RESEARCHGATE: 'bg-sky-50 text-sky-700 border-sky-200',
-    MANUAL: 'bg-gray-50 text-gray-600 border-gray-200',
-    CSV_IMPORT: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    GOOGLE_SCHOLAR: 'border border-brand-200 bg-brand-50 text-brand-700',
+    CROSSREF: 'border border-gray-300 bg-white text-gray-700',
+    ORCID: 'border border-gray-300 bg-gray-50 text-gray-700',
+    PUBMED: 'border border-slate-300 bg-slate-50 text-slate-700',
+    RESEARCHGATE: 'border border-gray-300 bg-white text-gray-700',
+    MANUAL: 'border border-gray-300 bg-white text-gray-600',
+    CSV_IMPORT: 'border border-gray-300 bg-gray-50 text-gray-700',
   };
-  return colors[source] || 'bg-gray-50 text-gray-600 border-gray-200';
+  return colors[source] || 'border border-gray-300 bg-white text-gray-600';
 }

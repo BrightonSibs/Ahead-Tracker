@@ -13,7 +13,7 @@ export function SluShield({ className, title = 'Saint Louis University shield' }
       xmlns="http://www.w3.org/2000/svg"
     >
       <path
-        fill="#1847A7"
+        fill="#003DA5"
         d="M140 10h40v30h28v34h32c18 0 34 15 34 34v134c0 113-55 183-114 220C101 425 46 355 46 242V108c0-19 16-34 34-34h32V40h28V10Z"
       />
       <path fill="#FFF" d="M151 24h18v26h24v14h-24v20h-18V64h-24V50h24V24Z" />
@@ -22,7 +22,7 @@ export function SluShield({ className, title = 'Saint Louis University shield' }
         d="M82 102h156c10 0 18 8 18 18v119c0 99-46 159-96 194-50-35-96-95-96-194V120c0-10 8-18 18-18Z"
       />
       <path
-        fill="#1847A7"
+        fill="#003DA5"
         d="M92 120h136c6 0 10 4 10 10v108c0 88-39 141-78 171-39-30-78-83-78-171V130c0-6 4-10 10-10Z"
       />
       <path

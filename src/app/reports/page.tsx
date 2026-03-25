@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Alert, Spinner } from '@/components/ui';
 import { fetchJsonCached } from '@/lib/client-cache';
+import type { DepartmentSummary } from '@/types';
 
 export default function ReportsPage() {
   const [researchers, setResearchers] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
   const [selectedResearcher, setSelectedResearcher] = useState('');
@@ -19,12 +21,32 @@ export default function ReportsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetchJsonCached<any[]>('/api/researchers')
-      .then(d => {
-        if (!cancelled) {
-          setResearchers(d);
-          setLoading(false);
-        }
+    Promise.allSettled([
+      fetchJsonCached<any[]>('/api/researchers'),
+      fetchJsonCached<DepartmentSummary[]>('/api/departments'),
+    ])
+      .then(([researcherResult, departmentResult]) => {
+        if (cancelled) return;
+
+        const researcherData = researcherResult.status === 'fulfilled' && Array.isArray(researcherResult.value)
+          ? researcherResult.value
+          : [];
+        const departmentData = departmentResult.status === 'fulfilled' && Array.isArray(departmentResult.value)
+          ? departmentResult.value
+          : Array.from(new Set(researcherData.map(item => item.department))).map((code, index) => ({
+              id: `fallback-${code}`,
+              code,
+              name: code,
+              shortName: code,
+              color: null,
+              activeStatus: true,
+              displayOrder: index,
+              researcherCount: researcherData.filter(item => item.department === code).length,
+            }));
+
+        setResearchers(researcherData);
+        setDepartments(departmentData.filter((item: DepartmentSummary) => item.activeStatus));
+        setLoading(false);
       })
       .catch(() => {
         if (!cancelled) setLoading(false);
@@ -106,8 +128,11 @@ export default function ReportsPage() {
               <select value={selectedDept} onChange={e => setSelectedDept(e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
                 <option value="">All Departments</option>
-                <option value="AHEAD">AHEAD</option>
-                <option value="HCOR">HCOR</option>
+                {departments.map(department => (
+                  <option key={department.code} value={department.code}>
+                    {department.shortName || department.name}
+                  </option>
+                ))}
               </select>
             </div>
             <div>

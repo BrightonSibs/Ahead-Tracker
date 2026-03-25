@@ -1,13 +1,14 @@
 'use client';
+
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
-import { Card, Badge, Button, Spinner, EmptyState, ProgressBar, KpiCard } from '@/components/ui';
+import { Card, Button, Spinner, EmptyState, ProgressBar, KpiCard } from '@/components/ui';
 import { FilterBar } from '@/components/filters';
 import { fetchJsonCached } from '@/lib/client-cache';
-import { departmentColor, confidenceBadgeColor } from '@/lib/utils';
-import type { ResearcherSummary } from '@/types';
+import { departmentColor } from '@/lib/utils';
+import type { DepartmentSummary, ResearcherSummary } from '@/types';
 
 export default function ResearchersPage() {
   return (
@@ -20,6 +21,7 @@ export default function ResearchersPage() {
 function ResearchersPageContent() {
   const searchParams = useSearchParams();
   const [researchers, setResearchers] = useState<ResearcherSummary[]>([]);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const [summary, setSummary] = useState<{ totalCitations: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -32,16 +34,36 @@ function ResearchersPageContent() {
     const params = new URLSearchParams();
     if (department) params.set('department', department);
     if (search) params.set('search', search);
-    Promise.all([
+
+    Promise.allSettled([
       fetchJsonCached<ResearcherSummary[]>(`/api/researchers?${params}`),
       fetchJsonCached<{ totalCitations: number }>(`/api/researchers?summary=true&${params}`),
+      fetchJsonCached<DepartmentSummary[]>('/api/departments'),
     ])
-      .then(([researcherData, summaryData]) => {
-        if (!cancelled) {
-          setResearchers(researcherData);
-          setSummary(summaryData);
-          setLoading(false);
-        }
+      .then(([researcherResult, summaryResult, departmentResult]) => {
+        if (cancelled) return;
+
+        const researcherData = researcherResult.status === 'fulfilled' && Array.isArray(researcherResult.value)
+          ? researcherResult.value
+          : [];
+        const summaryData = summaryResult.status === 'fulfilled' ? summaryResult.value : { totalCitations: 0 };
+        const departmentData = departmentResult.status === 'fulfilled' && Array.isArray(departmentResult.value)
+          ? departmentResult.value
+          : Array.from(new Set(researcherData.map(item => item.department))).map((code, index) => ({
+              id: `fallback-${code}`,
+              code,
+              name: code,
+              shortName: code,
+              color: null,
+              activeStatus: true,
+              displayOrder: index,
+              researcherCount: researcherData.filter(item => item.department === code).length,
+            }));
+
+        setResearchers(researcherData);
+        setSummary(summaryData);
+        setDepartments(departmentData.filter(item => item.activeStatus));
+        setLoading(false);
       })
       .catch(() => {
         if (!cancelled) setLoading(false);
@@ -52,122 +74,138 @@ function ResearchersPageContent() {
     };
   }, [department, search]);
 
-  const maxH = Math.max(...researchers.map(r => r.hIndex), 0);
+  const representedDepartments = Array.from(new Set(researchers.map(researcher => researcher.department)));
+  const leadingDepartment = departments
+    .map(departmentItem => ({
+      ...departmentItem,
+      count: researchers.filter(researcher => researcher.department === departmentItem.code).length,
+    }))
+    .sort((a, b) => b.count - a.count)[0];
 
   return (
     <PageLayout>
       <TopBar
         title="Researchers"
-        subtitle={`${researchers.length} faculty members — AHEAD & HCOR`}
+        subtitle={`${researchers.length} faculty members across ${representedDepartments.length || 0} departments`}
         actions={
           <a href="/api/export?type=researchers">
-            <Button variant="outline" size="sm">⬇ Export CSV</Button>
+            <Button variant="outline" size="sm">Export CSV</Button>
           </a>
         }
       />
       <PageContent>
-        {/* Summary KPIs */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard label="Total Faculty" value={researchers.length} color="blue" icon="👥" />
-          <KpiCard label="AHEAD" value={researchers.filter(r => r.department === 'AHEAD').length} color="blue" icon="🔬" />
-          <KpiCard label="HCOR" value={researchers.filter(r => r.department === 'HCOR').length} color="teal" icon="🏥" />
-          <KpiCard label="Total Citations" value={(summary?.totalCitations ?? 0).toLocaleString()} color="green" icon="📊" />
+          <KpiCard label="Total Faculty" value={researchers.length} color="blue" icon="R" />
+          <KpiCard label="Departments" value={representedDepartments.length} color="teal" icon="D" />
+          <KpiCard
+            label="Largest Department"
+            value={leadingDepartment?.shortName || leadingDepartment?.name || '-'}
+            sub={leadingDepartment ? `${leadingDepartment.count} researchers` : 'No department data'}
+            color="amber"
+            icon="L"
+          />
+          <KpiCard label="Total Citations" value={(summary?.totalCitations ?? 0).toLocaleString()} color="green" icon="C" />
         </div>
 
-        {/* Filters */}
         <FilterBar filters={[
-          { type: 'search', key: 'search', placeholder: 'Search by name, alias, department…', className: 'w-72' },
-          { type: 'select', key: 'department', label: 'All Departments',
-            options: [{ value: 'AHEAD', label: 'AHEAD' }, { value: 'HCOR', label: 'HCOR' }] },
+          { type: 'search', key: 'search', placeholder: 'Search by name, alias, department...', className: 'w-72' },
+          {
+            type: 'select',
+            key: 'department',
+            label: 'All Departments',
+            options: departments.map(departmentItem => ({
+              value: departmentItem.code,
+              label: departmentItem.shortName || departmentItem.name,
+            })),
+          },
         ]} />
 
         {loading ? (
           <div className="flex justify-center py-16"><Spinner size="lg" /></div>
         ) : researchers.length === 0 ? (
-          <EmptyState icon="👥" title="No researchers found"
-            description="Try adjusting your search or filter." />
+          <EmptyState icon="R" title="No researchers found" description="Try adjusting your search or filter." />
         ) : (
           <Card padding={false}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/50">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Researcher</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Department</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">ORCID</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">SLU Start</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Publications</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Citations</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">h-index</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Aliases</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Completeness</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Researcher</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Department</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">ORCID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">SLU Start</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Publications</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Citations</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">h-index</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aliases</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Completeness</th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {researchers.map(r => (
-                    <tr key={r.id} className="hover:bg-gray-50/70 transition-colors group">
+                  {researchers.map(researcher => (
+                    <tr key={researcher.id} className="group hover:bg-gray-50/70 transition-colors">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
-                            <span className="text-brand-700 text-xs font-bold">
-                              {r.canonicalName.split(' ').map(p => p[0]).slice(0, 2).join('')}
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100">
+                            <span className="text-xs font-bold text-brand-700">
+                              {researcher.canonicalName.split(' ').map(part => part[0]).slice(0, 2).join('')}
                             </span>
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">{r.canonicalName}</p>
-                            {r.notes && (
-                              <p className="text-xs text-amber-600 flex items-center gap-1 mt-0.5">
-                                ⚠ Pending verification
-                              </p>
+                            <p className="text-sm font-medium text-gray-900">{researcher.canonicalName}</p>
+                            {researcher.notes && (
+                              <p className="mt-0.5 text-xs text-amber-600">Pending verification</p>
                             )}
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${departmentColor(r.department)}`}>
-                          {r.department}
+                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${departmentColor(researcher.department)}`}>
+                          {researcher.department}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        {r.orcid ? (
-                          <a href={`https://orcid.org/${r.orcid}`} target="_blank" rel="noopener"
-                            className="text-xs text-teal-600 hover:text-teal-700 font-mono flex items-center gap-1">
-                            <span className="w-3 h-3 bg-teal-500 rounded-full inline-block" />
-                            {r.orcid.slice(0, 9)}…
+                        {researcher.orcid ? (
+                          <a
+                            href={`https://orcid.org/${researcher.orcid}`}
+                            target="_blank"
+                            rel="noopener"
+                            className="flex items-center gap-1 text-xs font-mono text-teal-600 hover:text-teal-700"
+                          >
+                            <span className="inline-block h-3 w-3 rounded-full bg-teal-500" />
+                            {researcher.orcid.slice(0, 9)}...
                           </a>
                         ) : (
-                          <span className="text-xs text-gray-400">—</span>
+                          <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 font-mono whitespace-nowrap">
-                        {r.sluStartDate ? r.sluStartDate.split('T')[0] : <span className="text-amber-500">Not set</span>}
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">
+                        {researcher.sluStartDate ? researcher.sluStartDate.split('T')[0] : <span className="text-amber-500">Not set</span>}
                       </td>
+                      <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">{researcher.publicationCount}</td>
+                      <td className="px-4 py-3 text-right text-sm font-semibold text-brand-700">{researcher.totalCitations.toLocaleString()}</td>
                       <td className="px-4 py-3 text-right">
-                        <span className="text-sm font-medium text-gray-900">{r.publicationCount}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-sm font-semibold text-brand-700">{r.totalCitations.toLocaleString()}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`inline-block min-w-[28px] text-center px-2 py-0.5 rounded text-sm font-bold font-display ${
-                          r.hIndex >= 10 ? 'bg-green-50 text-green-700' :
-                          r.hIndex >= 5 ? 'bg-brand-50 text-brand-700' :
+                        <span className={`inline-block min-w-[28px] rounded px-2 py-0.5 text-sm font-bold ${
+                          researcher.hIndex >= 10 ? 'bg-green-50 text-green-700' :
+                          researcher.hIndex >= 5 ? 'bg-brand-50 text-brand-700' :
                           'bg-gray-50 text-gray-600'
-                        }`}>{r.hIndex}</span>
+                        }`}>
+                          {researcher.hIndex}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{researcher.aliasCount} alias{researcher.aliasCount !== 1 ? 'es' : ''}</td>
+                      <td className="w-28 px-4 py-3">
+                        <ProgressBar
+                          value={researcher.profileCompleteness}
+                          color={researcher.profileCompleteness >= 80 ? 'green' : researcher.profileCompleteness >= 50 ? 'blue' : 'amber'}
+                        />
+                        <span className="mt-0.5 text-[10px] text-gray-400">{researcher.profileCompleteness}%</span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs text-gray-500">{r.aliasCount} alias{r.aliasCount !== 1 ? 'es' : ''}</span>
-                      </td>
-                      <td className="px-4 py-3 w-28">
-                        <ProgressBar value={r.profileCompleteness}
-                          color={r.profileCompleteness >= 80 ? 'green' : r.profileCompleteness >= 50 ? 'blue' : 'amber'} />
-                        <span className="text-[10px] text-gray-400 mt-0.5">{r.profileCompleteness}%</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Link href={`/researchers/${r.id}`}>
-                          <Button variant="outline" size="xs" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            View →
+                        <Link href={`/researchers/${researcher.id}`}>
+                          <Button variant="outline" size="xs" className="opacity-0 transition-opacity group-hover:opacity-100">
+                            View
                           </Button>
                         </Link>
                       </td>

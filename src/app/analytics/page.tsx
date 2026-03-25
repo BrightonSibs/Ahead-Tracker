@@ -1,17 +1,24 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Spinner, Tabs, Toggle, KpiCard } from '@/components/ui';
 import {
-  CitationTrendChart, PublicationBarChart, HIndexChart,
-  SpecialtyBarChart, ImpactFactorChart, DeptPieChart,
+  CitationTrendChart,
+  PublicationBarChart,
+  HIndexChart,
+  SpecialtyBarChart,
+  ImpactFactorChart,
+  DeptPieChart,
 } from '@/components/charts';
 import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor } from '@/lib/utils';
+import type { DepartmentSummary } from '@/types';
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<any>(null);
   const [dashboard, setDashboard] = useState<any>(null);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [dept, setDept] = useState('');
   const [sluOnly, setSluOnly] = useState(false);
@@ -20,22 +27,44 @@ export default function AnalyticsPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+
     const params = new URLSearchParams();
     if (dept) params.set('department', dept);
     if (sluOnly) params.set('sluOnly', 'true');
 
-    Promise.all([
+    Promise.allSettled([
       fetchJsonCached<any>(`/api/analytics?type=full&${params}`),
       fetchJsonCached<any>(`/api/analytics?type=dashboard&${params}`),
-    ]).then(([fullData, dashData]) => {
-      if (!cancelled) {
+      fetchJsonCached<DepartmentSummary[]>('/api/departments'),
+    ])
+      .then(([fullResult, dashboardResult, departmentResult]) => {
+        if (cancelled) return;
+
+        const fullData = fullResult.status === 'fulfilled' ? fullResult.value : null;
+        const dashboardData = dashboardResult.status === 'fulfilled' ? dashboardResult.value : null;
+        const departmentData = departmentResult.status === 'fulfilled' && Array.isArray(departmentResult.value)
+          ? departmentResult.value
+          : (fullData?.departmentKeys || []).map((item: any, index: number) => ({
+              id: `fallback-${item.key}`,
+              code: item.key,
+              name: item.name,
+              shortName: item.name,
+              color: item.color || null,
+              activeStatus: true,
+              displayOrder: index,
+              researcherCount: 0,
+            }));
+
         setData(fullData);
-        setDashboard(dashData);
+        setDashboard(dashboardData);
+        setDepartments(departmentData.filter((item: DepartmentSummary) => item.activeStatus));
         setLoading(false);
-      }
-    }).catch(() => {
-      if (!cancelled) setLoading(false);
-    });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -58,111 +87,132 @@ export default function AnalyticsPage() {
         actions={
           <div className="flex items-center gap-3">
             <Toggle checked={sluOnly} onChange={setSluOnly} label="SLU tenure only" />
-            <select value={dept} onChange={e => setDept(e.target.value)}
-              className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
+            <select
+              value={dept}
+              onChange={e => setDept(e.target.value)}
+              className="border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-700"
+            >
               <option value="">All Departments</option>
-              <option value="AHEAD">AHEAD only</option>
-              <option value="HCOR">HCOR only</option>
+              {departments.map(department => (
+                <option key={department.code} value={department.code}>
+                  {department.shortName || department.name}
+                </option>
+              ))}
             </select>
             <a href={`/api/export?type=researchers${dept ? `&department=${dept}` : ''}`}>
-              <Button variant="outline" size="sm">⬇ Export</Button>
+              <Button variant="outline" size="sm">Export</Button>
             </a>
           </div>
         }
       />
+
       <PageContent>
-        {/* Global KPIs */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard label="Total Publications" value={dashboard?.totalPublications ?? '—'} color="blue" icon="📄" />
-          <KpiCard label="Total Citations" value={(dashboard?.totalCitations ?? 0).toLocaleString()} color="teal" icon="📊" />
+          <KpiCard label="Total Publications" value={dashboard?.totalPublications ?? '-'} color="blue" icon="P" />
+          <KpiCard label="Total Citations" value={(dashboard?.totalCitations ?? 0).toLocaleString()} color="teal" icon="C" />
           <KpiCard
             label="Observed Citation Growth"
             value={(dashboard?.citationsThisYear ?? 0).toLocaleString()}
             sub={`${new Date().getFullYear()} from stored snapshots`}
             color="green"
-            icon="📈"
+            icon="G"
           />
-          <KpiCard label="Avg Citations / Article" value={dashboard?.avgCitationsPerArticle ?? '—'} color="amber" icon="⭐" />
+          <KpiCard label="Avg Citations / Article" value={dashboard?.avgCitationsPerArticle ?? '-'} color="amber" icon="A" />
         </div>
 
         <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
         {loading ? (
-          <div className="flex justify-center py-20"><Spinner size="lg" /></div>
+          <div className="flex justify-center py-20">
+            <Spinner size="lg" />
+          </div>
         ) : (
           <>
-            {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div className="space-y-5">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <Card>
                     <CardHeader>
                       <div>
                         <CardTitle>Annual Publications</CardTitle>
-                        <p className="text-xs text-gray-500 mt-0.5">By department per year</p>
+                        <p className="mt-0.5 text-xs text-gray-500">By department per year</p>
                       </div>
                     </CardHeader>
-                    <PublicationBarChart data={data?.publicationsByYear || []} />
+                    <PublicationBarChart data={data?.publicationsByYear || []} keys={data?.departmentKeys || []} />
                   </Card>
+
                   <Card>
                     <CardHeader>
                       <div>
                         <CardTitle>Department Share</CardTitle>
-                        <p className="text-xs text-gray-500 mt-0.5">Total publications by dept</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Total publications by department</p>
                       </div>
                     </CardHeader>
-                    <DeptPieChart data={[
-                      { name: 'AHEAD', value: data?.publicationsByYear?.reduce((s: number, r: any) => s + (r.AHEAD || 0), 0) || 0 },
-                      { name: 'HCOR',  value: data?.publicationsByYear?.reduce((s: number, r: any) => s + (r.HCOR || 0), 0) || 0 },
-                    ]} />
+                    <DeptPieChart data={data?.departmentPublicationTotals || []} />
                   </Card>
                 </div>
 
-                {/* Researcher summary table */}
                 <Card padding={false}>
-                  <div className="px-5 pt-4 pb-3 border-b border-gray-100">
+                  <div className="border-b border-gray-100 px-5 pb-3 pt-4">
                     <CardTitle>Researcher Summary Table</CardTitle>
-                    <p className="text-xs text-gray-500 mt-0.5">All researchers ranked by h-index</p>
+                    <p className="mt-0.5 text-xs text-gray-500">All researchers ranked by h-index</p>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
-                        <tr className="bg-gray-50/60">
-                          {['#', 'Researcher', 'Dept', 'Publications', 'Total Citations', 'Avg Citations', 'h-index', 'i10-index'].map((h, i) => (
-                            <th key={i} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${i >= 3 ? 'text-right' : 'text-left'}`}>{h}</th>
+                        <tr className="bg-gray-50">
+                          {['#', 'Researcher', 'Dept', 'Publications', 'Total Citations', 'Avg Citations', 'h-index', 'i10-index'].map((header, index) => (
+                            <th
+                              key={index}
+                              className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${index >= 3 ? 'text-right' : 'text-left'}`}
+                            >
+                              {header}
+                            </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {data?.researcherStats?.map((r: any, i: number) => (
-                          <tr key={r.id} className="hover:bg-gray-50/60 transition-colors">
-                            <td className="px-4 py-3 text-sm font-bold text-gray-300 font-display">{i + 1}</td>
+                      <tbody className="divide-y divide-gray-200">
+                        {data?.researcherStats?.map((researcher: any, index: number) => (
+                          <tr key={researcher.id} className="transition-colors hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-semibold text-gray-400">{index + 1}</td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-brand-700 text-[10px] font-bold">
-                                    {r.name.split(' ').map((p: string) => p[0]).slice(0, 2).join('')}
+                                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border border-gray-300 bg-gray-50">
+                                  <span className="text-[10px] font-bold text-brand-700">
+                                    {researcher.name.split(' ').map((part: string) => part[0]).slice(0, 2).join('')}
                                   </span>
                                 </div>
-                                <a href={`/researchers/${r.id}`} className="text-sm font-medium text-gray-900 hover:text-brand-700">{r.name}</a>
+                                <a href={`/researchers/${researcher.id}`} className="text-sm font-medium text-gray-900 hover:text-brand-700">
+                                  {researcher.name}
+                                </a>
                               </div>
                             </td>
                             <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${departmentColor(r.department)}`}>{r.department}</span>
+                              <span className={`rounded px-2 py-0.5 text-xs font-medium ${departmentColor(researcher.department)}`}>
+                                {researcher.department}
+                              </span>
                             </td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-700">{r.publications}</td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-brand-700">{r.totalCitations.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-700">{researcher.publications}</td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-brand-700">
+                              {researcher.totalCitations.toLocaleString()}
+                            </td>
                             <td className="px-4 py-3 text-right text-sm text-gray-600">
-                              {r.publications > 0 ? (r.totalCitations / r.publications).toFixed(1) : '0'}
+                              {researcher.publications > 0 ? (researcher.totalCitations / researcher.publications).toFixed(1) : '0'}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <span className={`inline-block min-w-[28px] text-center px-2 py-0.5 rounded text-sm font-bold font-display ${
-                                r.hIndex >= 10 ? 'bg-green-50 text-green-700' :
-                                r.hIndex >= 5  ? 'bg-brand-50 text-brand-700' :
-                                'bg-gray-50 text-gray-600'
-                              }`}>{r.hIndex}</span>
+                              <span
+                                className={`inline-block min-w-[28px] border px-2 py-0.5 text-center text-sm font-semibold ${
+                                  researcher.hIndex >= 10
+                                    ? 'border-brand-200 bg-brand-50 text-brand-700'
+                                    : researcher.hIndex >= 5
+                                      ? 'border-gray-300 bg-gray-50 text-gray-700'
+                                      : 'border-gray-300 bg-white text-gray-600'
+                                }`}
+                              >
+                                {researcher.hIndex}
+                              </span>
                             </td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-600">{r.i10Index}</td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">{researcher.i10Index}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -172,30 +222,23 @@ export default function AnalyticsPage() {
               </div>
             )}
 
-            {/* CITATIONS TAB */}
             {activeTab === 'citations' && (
               <div className="space-y-5">
                 <Card>
                   <CardHeader>
                     <div>
                       <CardTitle>Observed Citation Growth by Department</CardTitle>
-                      <p className="text-xs text-gray-500 mt-0.5">Year-over-year growth inferred from stored citation snapshots</p>
+                      <p className="mt-0.5 text-xs text-gray-500">Year-over-year growth inferred from stored citation snapshots</p>
                     </div>
                   </CardHeader>
-                  <CitationTrendChart
-                    data={data?.citationsByYear || []}
-                    keys={[
-                      { key: 'AHEAD', name: 'AHEAD', color: '#1a6fb5' },
-                      { key: 'HCOR',  name: 'HCOR',  color: '#14b8a6' },
-                    ]}
-                  />
+                  <CitationTrendChart data={data?.citationsByYear || []} keys={data?.departmentKeys || []} />
                 </Card>
 
                 <Card>
                   <CardHeader>
                     <div>
                       <CardTitle>Per-Researcher Citation Growth</CardTitle>
-                      <p className="text-xs text-gray-500 mt-0.5">Top 6 researchers by total citations, using observed growth only</p>
+                      <p className="mt-0.5 text-xs text-gray-500">Top 6 researchers by total citations, using observed growth only</p>
                     </div>
                   </CardHeader>
                   <ResearcherCitationChart researcherStats={data?.researcherStats?.slice(0, 6) || []} />
@@ -203,51 +246,71 @@ export default function AnalyticsPage() {
               </div>
             )}
 
-            {/* H-INDEX TAB */}
             {activeTab === 'hindex' && (
               <div className="space-y-5">
                 <Card>
                   <CardHeader>
                     <CardTitle>h-index Comparison</CardTitle>
-                    <p className="text-xs text-gray-500">Color: <span className="text-brand-600 font-medium">AHEAD</span> · <span className="text-teal-600 font-medium">HCOR</span></p>
+                    <p className="text-xs text-gray-500">Bars are colored by department.</p>
                   </CardHeader>
-                  <HIndexChart data={data?.researcherStats?.map((r: any) => ({
-                    name: r.name.split(' ').slice(-1)[0],
-                    hIndex: r.hIndex,
-                    dept: r.department,
-                  })) || []} />
+                  <HIndexChart
+                    data={
+                      data?.researcherStats?.map((researcher: any) => ({
+                        name: researcher.name.split(' ').slice(-1)[0],
+                        hIndex: researcher.hIndex,
+                        dept: researcher.department,
+                      })) || []
+                    }
+                  />
                 </Card>
 
                 <Card padding={false}>
-                  <div className="px-5 pt-4 pb-3 border-b border-gray-100">
-                    <CardTitle>h-index & i10-index Details</CardTitle>
+                  <div className="border-b border-gray-100 px-5 pb-3 pt-4">
+                    <CardTitle>h-index and i10-index Details</CardTitle>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
-                        <tr className="bg-gray-50/60">
-                          {['Researcher', 'Dept', 'h-index', 'i10-index', 'Total Citations', 'Publications', 'Avg Cit/Article'].map((h, i) => (
-                            <th key={i} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${i >= 2 ? 'text-right' : 'text-left'}`}>{h}</th>
+                        <tr className="bg-gray-50">
+                          {['Researcher', 'Dept', 'h-index', 'i10-index', 'Total Citations', 'Publications', 'Avg Cit/Article'].map((header, index) => (
+                            <th
+                              key={index}
+                              className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${index >= 2 ? 'text-right' : 'text-left'}`}
+                            >
+                              {header}
+                            </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {data?.researcherStats?.map((r: any) => (
-                          <tr key={r.id} className="hover:bg-gray-50/60">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{r.name}</td>
+                      <tbody className="divide-y divide-gray-200">
+                        {data?.researcherStats?.map((researcher: any) => (
+                          <tr key={researcher.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{researcher.name}</td>
                             <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${departmentColor(r.department)}`}>{r.department}</span>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <span className={`font-bold font-display text-lg ${r.hIndex >= 10 ? 'text-green-700' : r.hIndex >= 5 ? 'text-brand-700' : 'text-gray-600'}`}>
-                                {r.hIndex}
+                              <span className={`rounded px-2 py-0.5 text-xs font-medium ${departmentColor(researcher.department)}`}>
+                                {researcher.department}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-right font-semibold text-teal-700">{r.i10Index}</td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-brand-700">{r.totalCitations.toLocaleString()}</td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-600">{r.publications}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span
+                                className={`text-lg font-semibold ${
+                                  researcher.hIndex >= 10
+                                    ? 'text-brand-700'
+                                    : researcher.hIndex >= 5
+                                      ? 'text-gray-800'
+                                      : 'text-gray-600'
+                                }`}
+                              >
+                                {researcher.hIndex}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right font-semibold text-gray-700">{researcher.i10Index}</td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-brand-700">
+                              {researcher.totalCitations.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">{researcher.publications}</td>
                             <td className="px-4 py-3 text-right text-sm text-gray-600">
-                              {r.publications > 0 ? (r.totalCitations / r.publications).toFixed(1) : '0'}
+                              {researcher.publications > 0 ? (researcher.totalCitations / researcher.publications).toFixed(1) : '0'}
                             </td>
                           </tr>
                         ))}
@@ -258,29 +321,31 @@ export default function AnalyticsPage() {
               </div>
             )}
 
-            {/* SPECIALTIES TAB */}
             {activeTab === 'specialties' && (
               <div className="space-y-5">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <Card>
                     <CardHeader>
                       <CardTitle>Publications by Specialty</CardTitle>
                     </CardHeader>
                     <SpecialtyBarChart data={data?.specialtyDistribution || []} />
                   </Card>
+
                   <Card>
                     <CardHeader>
                       <CardTitle>Specialty Breakdown</CardTitle>
                     </CardHeader>
                     <div className="space-y-2.5">
-                      {data?.specialtyDistribution?.map((s: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3">
-                          <div className="w-28 text-xs text-gray-600 truncate text-right">{s.specialty}</div>
-                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bg-teal-500 transition-all"
-                              style={{ width: `${(s.count / (data.specialtyDistribution[0]?.count || 1)) * 100}%` }} />
+                      {data?.specialtyDistribution?.map((specialty: any, index: number) => (
+                        <div key={index} className="flex items-center gap-3">
+                          <div className="w-28 truncate text-right text-xs text-gray-600">{specialty.specialty}</div>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+                            <div
+                              className="h-full bg-gray-600 transition-all"
+                              style={{ width: `${(specialty.count / (data.specialtyDistribution[0]?.count || 1)) * 100}%` }}
+                            />
                           </div>
-                          <span className="text-xs font-semibold text-gray-700 w-6 text-right">{s.count}</span>
+                          <span className="w-6 text-right text-xs font-semibold text-gray-700">{specialty.count}</span>
                         </div>
                       ))}
                     </div>
@@ -293,18 +358,17 @@ export default function AnalyticsPage() {
                     <p className="text-xs text-gray-500">Observed yearly citation growth for the most-cited specialties</p>
                   </CardHeader>
                   <CitationTrendChart
-                    data={data?.specialtyCitationTrends || []}
-                    keys={(data?.specialtyCitationTrendKeys || []).map((item: any, index: number) => ({
-                      key: item.key,
-                      name: item.name,
-                      color: ['#14b8a6', '#1a6fb5', '#16a34a', '#d97706', '#dc2626'][index % 5],
-                    }))}
-                  />
+                      data={data?.specialtyCitationTrends || []}
+                      keys={(data?.specialtyCitationTrendKeys || []).map((item: any, index: number) => ({
+                        key: item.key,
+                        name: item.name,
+                        color: ['#003DA5', '#4B5563', '#9CA3AF', '#1F2937', '#6B7280'][index % 5],
+                      }))}
+                    />
                 </Card>
               </div>
             )}
 
-            {/* IMPACT FACTORS TAB */}
             {activeTab === 'impact' && (
               <div className="space-y-5">
                 <Card>
@@ -313,18 +377,22 @@ export default function AnalyticsPage() {
                     <p className="text-xs text-gray-500">Weighted average journal impact factor</p>
                   </CardHeader>
                   <div className="space-y-3 py-2">
-                    {data?.researcherStats?.map((r: any) => (
-                      <div key={r.id} className="flex items-center gap-3">
-                        <span className="w-36 text-xs text-gray-700 text-right truncate">{r.name.split(' ').slice(-1)[0]}</span>
-                        <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full bg-brand-400 transition-all"
-                            style={{ width: `${Math.min(100, ((r.avgImpactFactor || 0) / 10) * 100)}%` }} />
+                    {data?.researcherStats?.map((researcher: any) => (
+                      <div key={researcher.id} className="flex items-center gap-3">
+                        <span className="w-36 truncate text-right text-xs text-gray-700">
+                          {researcher.name.split(' ').slice(-1)[0]}
+                        </span>
+                        <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100">
+                          <div
+                            className="h-full bg-brand-700 transition-all"
+                            style={{ width: `${Math.min(100, ((researcher.avgImpactFactor || 0) / 10) * 100)}%` }}
+                          />
                         </div>
                         <span className="w-12 text-right text-xs font-medium text-gray-700">
-                          {r.avgImpactFactor != null ? r.avgImpactFactor.toFixed(1) : '—'}
+                          {researcher.avgImpactFactor != null ? researcher.avgImpactFactor.toFixed(1) : '-'}
                         </span>
-                        <span className={`text-xs font-medium w-8 text-right ${departmentColor(r.department).split(' ')[1]}`}>
-                          {r.department}
+                        <span className={`w-8 text-right text-xs font-medium ${departmentColor(researcher.department).split(' ')[1]}`}>
+                          {researcher.department}
                         </span>
                       </div>
                     ))}
@@ -334,7 +402,7 @@ export default function AnalyticsPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle>Impact Factor Distribution</CardTitle>
-                    <p className="text-xs text-gray-500">Publications binned by journal IF tier</p>
+                    <p className="text-xs text-gray-500">Publications binned by journal impact factor tier</p>
                   </CardHeader>
                   <ImpactFactorChart data={data?.impactFactorDistribution || []} />
                 </Card>
@@ -347,46 +415,46 @@ export default function AnalyticsPage() {
   );
 }
 
-// Inner component for per-researcher citation trends
 function ResearcherCitationChart({ researcherStats }: { researcherStats: any[] }) {
   const [chartData, setChartData] = useState<any[]>([]);
-  const COLORS = ['#1a6fb5', '#14b8a6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6'];
+  const colors = ['#003DA5', '#4B5563', '#6B7280', '#9CA3AF', '#1F2937', '#D1D5DB'];
 
   useEffect(() => {
     if (!researcherStats.length) return;
+
     let cancelled = false;
-    // Fetch citation data per top researcher
-    Promise.all(
-      researcherStats.slice(0, 6).map(r =>
-        fetchJsonCached<any>(`/api/researchers/${r.id}`).catch(() => null)
-      )
-    ).then(details => {
-      if (cancelled) return;
-      // Merge by year
-      const yearMap: Record<number, Record<string, number>> = {};
-      details.forEach((d, i) => {
-        if (!d?.citationByYear) return;
-        for (const { year, citations } of d.citationByYear) {
-          if (!yearMap[year]) yearMap[year] = {};
-          yearMap[year][`r${i}`] = citations;
-        }
+
+    Promise.all(researcherStats.slice(0, 6).map(researcher => fetchJsonCached<any>(`/api/researchers/${researcher.id}`).catch(() => null)))
+      .then(details => {
+        if (cancelled) return;
+
+        const yearMap: Record<number, Record<string, number>> = {};
+
+        details.forEach((detail, index) => {
+          if (!detail?.citationByYear) return;
+
+          for (const { year, citations } of detail.citationByYear) {
+            if (!yearMap[year]) yearMap[year] = {};
+            yearMap[year][`r${index}`] = citations;
+          }
+        });
+
+        setChartData(
+          Object.entries(yearMap)
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([year, values]) => ({ year: Number(year), ...values })),
+        );
       });
-      setChartData(
-        Object.entries(yearMap)
-          .sort(([a], [b]) => Number(a) - Number(b))
-          .map(([year, vals]) => ({ year: Number(year), ...vals }))
-      );
-    });
 
     return () => {
       cancelled = true;
     };
   }, [researcherStats]);
 
-  const keys = researcherStats.slice(0, 6).map((r, i) => ({
-    key: `r${i}`,
-    name: r.name.split(' ').slice(-1)[0],
-    color: COLORS[i],
+  const keys = researcherStats.slice(0, 6).map((researcher, index) => ({
+    key: `r${index}`,
+    name: researcher.name.split(' ').slice(-1)[0],
+    color: colors[index],
   }));
 
   return <CitationTrendChart data={chartData} keys={keys} />;

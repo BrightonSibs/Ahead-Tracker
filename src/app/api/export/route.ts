@@ -159,7 +159,7 @@ async function buildPdfReport(filters: ExportFilters) {
   ].filter(Boolean).join(' | ');
 
   doc.setFontSize(18);
-  doc.text('AHEAD Research Tracker Report', 40, 40);
+  doc.text('Research Output Tracker Report', 40, 40);
   doc.setFontSize(10);
   doc.text(filterSummary, 40, 58);
   doc.text(`Generated ${new Date().toLocaleString('en-US')}`, 40, 72);

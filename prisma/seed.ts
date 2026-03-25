@@ -47,6 +47,11 @@ type FacultyRecord = {
   notes?: string | null;
 };
 
+const DEPARTMENTS = [
+  { code: 'AHEAD', name: 'AHEAD', shortName: 'AHEAD', color: '#1a6fb5', displayOrder: 1 },
+  { code: 'HCOR', name: 'HCOR', shortName: 'HCOR', color: '#14b8a6', displayOrder: 2 },
+];
+
 // ─── FACULTY ROSTER (authoritative from spreadsheet) ──────────────────────
 const FACULTY: FacultyRecord[] = [
   {
@@ -685,6 +690,7 @@ async function main() {
   await prisma.researcherAlias.deleteMany({});
   await prisma.publication.deleteMany({});
   await prisma.researcher.deleteMany({});
+  await prisma.department.deleteMany({});
   await prisma.journalMetric.deleteMany({});
   await prisma.specialty.deleteMany({});
 
@@ -706,6 +712,29 @@ async function main() {
     create: { email: 'viewer@slu.edu', name: 'Viewer', passwordHash: await bcrypt.hash('viewer123', 10), role: UserRole.VIEWER },
   });
   console.log('✅ Users created');
+
+  // ── Departments ───────────────────────────────────────────────────────────
+  for (const department of DEPARTMENTS) {
+    await prisma.department.upsert({
+      where: { code: department.code },
+      update: {
+        name: department.name,
+        shortName: department.shortName,
+        color: department.color,
+        activeStatus: true,
+        displayOrder: department.displayOrder,
+      },
+      create: {
+        code: department.code,
+        name: department.name,
+        shortName: department.shortName,
+        color: department.color,
+        activeStatus: true,
+        displayOrder: department.displayOrder,
+      },
+    });
+  }
+  console.log('✅ Departments created');
 
   // ── Specialties ───────────────────────────────────────────────────────────
   const specialtyMap: Record<string, string> = {};

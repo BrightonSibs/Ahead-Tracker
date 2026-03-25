@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getResearcherById } from '@/lib/services/researchers';
 import { prisma } from '@/lib/prisma';
+import { normalizeDepartmentCode } from '@/lib/services/departments';
 
 function normalizeOrcid(value: unknown) {
   if (value === undefined) return undefined;
@@ -54,12 +55,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!prev) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const normalizedOrcid = normalizeOrcid(body.orcid);
+    const normalizedDepartment = body.department !== undefined
+      ? normalizeDepartmentCode(String(body.department || ''))
+      : undefined;
+
+    if (normalizedDepartment !== undefined) {
+      const department = await prisma.department.findUnique({ where: { code: normalizedDepartment } });
+      if (!department) {
+        return NextResponse.json({ error: 'Please select a valid department' }, { status: 400 });
+      }
+    }
+
     const updated = await prisma.$transaction(async tx => {
       const researcher = await tx.researcher.update({
         where: { id },
         data: {
           ...(body.canonicalName !== undefined ? { canonicalName: body.canonicalName } : {}),
-          ...(body.department !== undefined ? { department: body.department } : {}),
+          ...(normalizedDepartment !== undefined ? { department: normalizedDepartment } : {}),
           ...(normalizedOrcid !== undefined ? { orcid: normalizedOrcid } : {}),
           ...(body.sluStartDate !== undefined ? { sluStartDate: body.sluStartDate ? new Date(body.sluStartDate) : null } : {}),
           ...(body.notes !== undefined ? { notes: body.notes } : {}),

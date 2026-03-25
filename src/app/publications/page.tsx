@@ -6,7 +6,7 @@ import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, Button, Spinner, EmptyState } from '@/components/ui';
 import { fetchJsonCached } from '@/lib/client-cache';
 import { departmentColor, sourceBadgeColor, sourceLabel } from '@/lib/utils';
-import type { PublicationSummary, PaginatedResult } from '@/types';
+import type { DepartmentSummary, PublicationSummary, PaginatedResult } from '@/types';
 
 const SOURCE_OPTIONS = [
   { value: 'CROSSREF', label: 'CrossRef' },
@@ -37,6 +37,7 @@ function PublicationsPageContent() {
   const [result, setResult] = useState<PaginatedResult<PublicationSummary> | null>(null);
   const [loading, setLoading] = useState(true);
   const [researchers, setResearchers] = useState<{ id: string; canonicalName: string; department: string }[]>([]);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const searchParamsString = searchParams.toString();
 
   const page = Number(searchParams.get('page') || '1');
@@ -58,14 +59,37 @@ function PublicationsPageContent() {
   useEffect(() => {
     let cancelled = false;
 
-    fetchJsonCached<{ id: string; canonicalName: string; department: string }[]>('/api/researchers')
-      .then(res => {
-        if (!cancelled) {
-          setResearchers(res);
-        }
+    Promise.allSettled([
+      fetchJsonCached<{ id: string; canonicalName: string; department: string }[]>('/api/researchers'),
+      fetchJsonCached<DepartmentSummary[]>('/api/departments'),
+    ])
+      .then(([researcherResult, departmentResult]) => {
+        if (cancelled) return;
+
+        const researcherData = researcherResult.status === 'fulfilled' && Array.isArray(researcherResult.value)
+          ? researcherResult.value
+          : [];
+        const departmentData = departmentResult.status === 'fulfilled' && Array.isArray(departmentResult.value)
+          ? departmentResult.value
+          : Array.from(new Set(researcherData.map(item => item.department))).map((code, index) => ({
+              id: `fallback-${code}`,
+              code,
+              name: code,
+              shortName: code,
+              color: null,
+              activeStatus: true,
+              displayOrder: index,
+              researcherCount: researcherData.filter(item => item.department === code).length,
+            }));
+
+        setResearchers(researcherData);
+        setDepartments(departmentData.filter((item: DepartmentSummary) => item.activeStatus));
       })
       .catch(() => {
-        if (!cancelled) setResearchers([]);
+        if (!cancelled) {
+          setResearchers([]);
+          setDepartments([]);
+        }
       });
 
     return () => {
@@ -136,8 +160,11 @@ function PublicationsPageContent() {
             <select value={get('department')} onChange={e => setParam({ department: e.target.value || null })}
               className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 sm:w-auto">
               <option value="">All Depts</option>
-              <option value="AHEAD">AHEAD</option>
-              <option value="HCOR">HCOR</option>
+              {departments.map(department => (
+                <option key={department.code} value={department.code}>
+                  {department.shortName || department.name}
+                </option>
+              ))}
             </select>
 
             {/* Year range */}

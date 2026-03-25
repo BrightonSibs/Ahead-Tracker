@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Input, Alert, Spinner } from '@/components/ui';
 import { departmentColor } from '@/lib/utils';
+import type { DepartmentSummary } from '@/types';
 
 const ALIAS_TYPES = ['NAME_VARIANT', 'MAIDEN_NAME', 'ABBREVIATED', 'INITIALS_ONLY', 'LEGACY'];
 
@@ -11,23 +12,50 @@ export default function AdminResearchersPage() {
   const [researchers, setResearchers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [newAlias, setNewAlias] = useState({ aliasName: '', aliasType: 'NAME_VARIANT' });
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState({
-    facultyId: '', canonicalName: '', department: 'AHEAD',
+    facultyId: '', canonicalName: '', department: '',
     orcid: '', sluStartDate: '', notes: '',
     aliases: [] as { aliasName: string; aliasType: string }[],
   });
   const [newAddAlias, setNewAddAlias] = useState({ aliasName: '', aliasType: 'NAME_VARIANT' });
 
   useEffect(() => {
-    fetch('/api/researchers')
-      .then(r => r.json())
-      .then(d => { setResearchers(d); setLoading(false); });
+    Promise.allSettled([
+      fetch('/api/researchers').then(r => r.json()),
+      fetch('/api/departments').then(r => r.json()),
+    ]).then(([researcherResult, departmentResult]) => {
+      const researcherData = researcherResult.status === 'fulfilled' && Array.isArray(researcherResult.value)
+        ? researcherResult.value
+        : [];
+      const departmentData = departmentResult.status === 'fulfilled' && Array.isArray(departmentResult.value)
+        ? departmentResult.value
+        : Array.from(new Set(researcherData.map(item => item.department))).map((code, index) => ({
+            id: `fallback-${code}`,
+            code,
+            name: code,
+            shortName: code,
+            color: null,
+            activeStatus: true,
+            displayOrder: index,
+            researcherCount: researcherData.filter(item => item.department === code).length,
+          }));
+      setResearchers(researcherData);
+      setDepartments(departmentData);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!addForm.department && departments.length > 0) {
+      setAddForm(prev => ({ ...prev, department: departments[0].code }));
+    }
+  }, [departments, addForm.department]);
 
   async function saveEdit(id: string) {
     setSaving(true);
@@ -58,7 +86,15 @@ export default function AdminResearchersPage() {
     if (r.ok) {
       setMsg({ type: 'success', text: `${addForm.canonicalName} added successfully.` });
       setShowAddForm(false);
-      setAddForm({ facultyId: '', canonicalName: '', department: 'AHEAD', orcid: '', sluStartDate: '', notes: '', aliases: [] });
+      setAddForm({
+        facultyId: '',
+        canonicalName: '',
+        department: departments[0]?.code || '',
+        orcid: '',
+        sluStartDate: '',
+        notes: '',
+        aliases: [],
+      });
       const updated = await fetch('/api/researchers').then(res => res.json());
       setResearchers(updated);
     } else {
@@ -102,8 +138,12 @@ export default function AdminResearchersPage() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Department *</label>
                 <select value={addForm.department} onChange={e => setAddForm(p => ({ ...p, department: e.target.value }))}
                   className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:border-brand-500 outline-none">
-                  <option value="AHEAD">AHEAD</option>
-                  <option value="HCOR">HCOR</option>
+                  <option value="">Select department</option>
+                  {departments.filter(department => department.activeStatus).map(department => (
+                    <option key={department.code} value={department.code}>
+                      {department.shortName || department.name}
+                    </option>
+                  ))}
                 </select>
               </div>
               <Input label="ORCID" value={addForm.orcid} onChange={e => setAddForm(p => ({ ...p, orcid: e.target.value }))} placeholder="0000-0000-0000-0000" />
@@ -179,7 +219,11 @@ export default function AdminResearchersPage() {
                         {editingId === r.id ? (
                           <select value={editForm.department} onChange={e => setEditForm((p: any) => ({ ...p, department: e.target.value }))}
                             className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none">
-                            <option value="AHEAD">AHEAD</option><option value="HCOR">HCOR</option>
+                            {departments.map(department => (
+                              <option key={department.code} value={department.code}>
+                                {department.shortName || department.name}
+                              </option>
+                            ))}
                           </select>
                         ) : (
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${departmentColor(r.department)}`}>{r.department}</span>

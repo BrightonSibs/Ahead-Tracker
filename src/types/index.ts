@@ -18,6 +18,17 @@ export interface ResearcherSummary {
   specialties: string[];
 }
 
+export interface DepartmentSummary {
+  id: string;
+  code: string;
+  name: string;
+  shortName: string | null;
+  color: string | null;
+  activeStatus: boolean;
+  displayOrder: number;
+  researcherCount?: number;
+}
+
 export interface PublicationSummary {
   id: string;
   title: string;

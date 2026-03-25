@@ -12,11 +12,33 @@ export async function fetchJsonCached<T>(
   url: string,
   options?: { ttlMs?: number; force?: boolean },
 ): Promise<T> {
-  const ttlMs = options?.ttlMs ?? 30_000;
+  const ttlMs = options?.ttlMs ?? 60_000;
   const now = Date.now();
   const cached = responseCache.get(url);
 
   if (!options?.force && cached && cached.expiresAt > now) {
+    return cached.data as T;
+  }
+
+  if (!options?.force && cached) {
+    if (!inflightRequests.has(url)) {
+      const refresh = fetch(url)
+        .then(async response => {
+          if (!response.ok) {
+            throw new Error(`Request failed (${response.status}) for ${url}`);
+          }
+
+          const data = await response.json();
+          responseCache.set(url, { data, expiresAt: Date.now() + ttlMs });
+          return data as T;
+        })
+        .finally(() => {
+          inflightRequests.delete(url);
+        });
+
+      inflightRequests.set(url, refresh);
+    }
+
     return cached.data as T;
   }
 

@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
 import { Card, CardHeader, CardTitle, Button, Spinner } from '@/components/ui';
 import { fetchJsonCached } from '@/lib/client-cache';
-import { departmentColor } from '@/lib/utils';
+import { departmentColor, departmentHexColor } from '@/lib/utils';
+import type { DepartmentSummary } from '@/types';
 
 interface Node {
   id: string;
@@ -40,6 +41,7 @@ export default function CollaborationsPage() {
   const hoveredRef = useRef<Node | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<any>(null);
+  const departmentColorsRef = useRef<Record<string, string>>({});
 
   const [deptFilter, setDeptFilter] = useState('');
   const [minCoauth, setMinCoauth] = useState(1);
@@ -47,6 +49,11 @@ export default function CollaborationsPage() {
   const [selected, setSelected] = useState<any>(null);
   const [topPairs, setTopPairs] = useState<any[]>([]);
   const [topCollaborators, setTopCollaborators] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
+
+  const getDepartmentCanvasColor = useCallback((department: string) => {
+    return departmentColorsRef.current[department] || departmentHexColor(department);
+  }, []);
 
   const getNodeAtPosition = useCallback((mouseX: number, mouseY: number) => {
     let found: Node | null = null;
@@ -86,23 +93,27 @@ export default function CollaborationsPage() {
     });
 
     const maxPublications = Math.max(...filteredResearchers.map(researcher => researcher.publicationCount || 0), 1);
-    const deptCounts = {
-      AHEAD: Math.max(filteredResearchers.filter(researcher => researcher.department === 'AHEAD').length, 1),
-      HCOR: Math.max(filteredResearchers.filter(researcher => researcher.department === 'HCOR').length, 1),
-    };
-    const deptIndex = { AHEAD: 0, HCOR: 0 };
+    const activeDepartments = deptFilter
+      ? [deptFilter]
+      : Array.from(new Set(filteredResearchers.map(researcher => researcher.department)));
+    const deptCounts = activeDepartments.reduce<Record<string, number>>((acc, department) => {
+      acc[department] = Math.max(filteredResearchers.filter(researcher => researcher.department === department).length, 1);
+      return acc;
+    }, {});
+    const deptIndex = activeDepartments.reduce<Record<string, number>>((acc, department) => {
+      acc[department] = 0;
+      return acc;
+    }, {});
     const sharedCenterY = height * 0.52;
 
     nodesRef.current = filteredResearchers.map(researcher => {
-      const department = researcher.department === 'HCOR' ? 'HCOR' : 'AHEAD';
+      const department = researcher.department;
       const index = deptIndex[department]++;
       const angle = (index / deptCounts[department]) * Math.PI * 2;
-      const laneCenterX =
-        deptFilter === 'AHEAD' || deptFilter === 'HCOR'
-          ? width / 2
-          : department === 'AHEAD'
-            ? width * 0.36
-            : width * 0.64;
+      const lanePosition = activeDepartments.indexOf(department);
+      const laneCenterX = activeDepartments.length <= 1
+        ? width / 2
+        : ((lanePosition + 1) / (activeDepartments.length + 1)) * width;
       const orbit = 68 + (index % 5) * 18;
       const radiusScale = Math.sqrt((researcher.publicationCount || 1) / maxPublications);
 
@@ -151,9 +162,33 @@ export default function CollaborationsPage() {
     const params = new URLSearchParams();
     if (deptFilter) params.set('department', deptFilter);
 
-    fetchJsonCached<any>(`/api/collaborations?${params}`)
-      .then(network => {
+    Promise.allSettled([
+      fetchJsonCached<any>(`/api/collaborations?${params}`),
+      fetchJsonCached<DepartmentSummary[]>('/api/departments'),
+    ])
+      .then(([networkResult, departmentResult]) => {
         if (cancelled) return;
+
+        const network = networkResult.status === 'fulfilled' ? networkResult.value : { nodes: [], edges: [] };
+        const departmentData: DepartmentSummary[] = departmentResult.status === 'fulfilled' && Array.isArray(departmentResult.value)
+          ? departmentResult.value
+          : Array.from(new Set((network.nodes || []).map((item: any) => String(item.department || '')).filter(Boolean))).map((code, index) => ({
+              id: `fallback-${code}`,
+              code: String(code),
+              name: String(code),
+              shortName: String(code),
+              color: null,
+              activeStatus: true,
+              displayOrder: index,
+              researcherCount: (network.nodes || []).filter((item: any) => item.department === code).length,
+            }));
+
+        const activeDepartments = departmentData.filter(item => item.activeStatus);
+        departmentColorsRef.current = activeDepartments.reduce<Record<string, string>>((acc, item) => {
+          acc[item.code] = item.color || departmentHexColor(item.code);
+          return acc;
+        }, {});
+        setDepartments(activeDepartments);
         buildNetwork(network);
         setLoading(false);
       })
@@ -182,8 +217,6 @@ export default function CollaborationsPage() {
     canvas.height = height * dpr;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const departmentColors: Record<string, string> = { AHEAD: '#1a6fb5', HCOR: '#14b8a6' };
-
     function tick() {
       animRef.current = requestAnimationFrame(tick);
 
@@ -199,12 +232,13 @@ export default function CollaborationsPage() {
         }
         node.vx *= 0.9;
         node.vy *= 0.9;
-        const targetX =
-          deptFilter === 'AHEAD' || deptFilter === 'HCOR'
-            ? width / 2
-            : node.department === 'AHEAD'
-              ? width * 0.36
-              : width * 0.64;
+        const activeDepartments = deptFilter
+          ? [deptFilter]
+          : Array.from(new Set(nodes.map(item => item.department)));
+        const lanePosition = activeDepartments.indexOf(node.department);
+        const targetX = activeDepartments.length <= 1
+          ? width / 2
+          : ((lanePosition + 1) / (activeDepartments.length + 1)) * width;
         const targetY = height * 0.52;
         node.vx += (targetX - node.x) * 0.0025;
         node.vy += (targetY - node.y) * 0.0018;
@@ -256,10 +290,12 @@ export default function CollaborationsPage() {
       context.clearRect(0, 0, width, height);
 
       if (!deptFilter) {
-        context.fillStyle = 'rgba(26,111,181,0.04)';
-        context.fillRect(28, 24, width / 2 - 42, height - 48);
-        context.fillStyle = 'rgba(20,184,166,0.04)';
-        context.fillRect(width / 2 + 14, 24, width / 2 - 42, height - 48);
+        const activeDepartments = Array.from(new Set(nodes.map(item => item.department)));
+        activeDepartments.forEach((department, index) => {
+          const laneWidth = width / Math.max(activeDepartments.length, 1);
+          context.fillStyle = `${getDepartmentCanvasColor(department)}0A`;
+          context.fillRect(index * laneWidth + 16, 24, laneWidth - 32, height - 48);
+        });
       }
 
       edges.forEach(edge => {
@@ -278,7 +314,7 @@ export default function CollaborationsPage() {
       });
 
       nodes.forEach((node, index) => {
-        const color = departmentColors[node.department] || '#6b7280';
+        const color = getDepartmentCanvasColor(node.department);
         const isSelected = selectedRef.current?.id === node.id;
         const isHovered = hovered?.id === node.id;
         const showLabel = isSelected || isHovered || index < 4;
@@ -322,7 +358,7 @@ export default function CollaborationsPage() {
     }
 
     tick();
-  }, [deptFilter]);
+  }, [deptFilter, getDepartmentCanvasColor]);
 
   useEffect(() => {
     if (!loading) {
@@ -433,7 +469,7 @@ export default function CollaborationsPage() {
 
   return (
     <PageLayout>
-      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph - AHEAD and HCOR" />
+      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph across departments" />
       <PageContent>
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
           <div className="space-y-4 lg:col-span-3">
@@ -445,8 +481,11 @@ export default function CollaborationsPage() {
                   className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-500"
                 >
                   <option value="">All Departments</option>
-                  <option value="AHEAD">AHEAD only</option>
-                  <option value="HCOR">HCOR only</option>
+                  {departments.map(department => (
+                    <option key={department.code} value={department.code}>
+                      {department.shortName || department.name}
+                    </option>
+                  ))}
                 </select>
                 <select
                   value={minCoauth}
@@ -458,12 +497,14 @@ export default function CollaborationsPage() {
                   <option value={3}>Min 3 co-authored</option>
                 </select>
                 <div className="ml-auto flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-3 w-3 rounded-full bg-brand-500" /> AHEAD
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-3 w-3 rounded-full bg-teal-500" /> HCOR
-                  </span>
+                  {departments.map(department => (
+                    <span key={department.code} className="flex items-center gap-1.5">
+                      <span
+                        className="inline-block h-3 w-3 rounded-full"
+                        style={{ backgroundColor: getDepartmentCanvasColor(department.code) }}
+                      /> {department.shortName || department.name}
+                    </span>
+                  ))}
                   <span>Hover for names, click for details</span>
                 </div>
               </div>

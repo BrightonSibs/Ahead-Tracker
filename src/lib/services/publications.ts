@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { buildObservedCitationGrowthByYear } from '@/lib/citation-metrics';
+import { getAllDepartments } from '@/lib/services/departments';
+import { departmentHexColor } from '@/lib/utils';
 import type { FilterState, PaginatedResult, PublicationSummary } from '@/types';
 
 type PublicationWithRelations = Awaited<ReturnType<typeof fetchPublications>>[number];
@@ -279,6 +281,9 @@ export async function getPublicationById(id: string) {
 export async function getAnalyticsData(filters: FilterState = {}) {
   const researcherWhere = filters.department ? { department: filters.department } : {};
 
+  const departments = (await getAllDepartments(false))
+    .filter(department => (filters.department ? department.code === filters.department : true));
+
   const researchers = await prisma.researcher.findMany({
     where: researcherWhere,
     include: {
@@ -411,17 +416,36 @@ export async function getAnalyticsData(filters: FilterState = {}) {
     ...Object.keys(citationsByYear).map(Number),
   ])).sort((a, b) => a - b);
 
+  const departmentKeys = departments.map(department => ({
+    key: department.code,
+    name: department.shortName || department.name,
+    color: department.color || departmentHexColor(department.code),
+  }));
+
+  const departmentPublicationTotals = departmentKeys.map(department => ({
+    name: department.name,
+    code: department.key,
+    value: years.reduce((sum, year) => sum + (publicationsByYear[year]?.[department.key] ?? 0), 0),
+    color: department.color,
+  }));
+
   return {
     publicationsByYear: years.map(year => ({
       year,
-      AHEAD: publicationsByYear[year]?.AHEAD ?? 0,
-      HCOR: publicationsByYear[year]?.HCOR ?? 0,
+      ...departmentKeys.reduce<Record<string, number>>((acc, department) => {
+        acc[department.key] = publicationsByYear[year]?.[department.key] ?? 0;
+        return acc;
+      }, {}),
     })),
     citationsByYear: years.map(year => ({
       year,
-      AHEAD: citationsByYear[year]?.AHEAD ?? 0,
-      HCOR: citationsByYear[year]?.HCOR ?? 0,
+      ...departmentKeys.reduce<Record<string, number>>((acc, department) => {
+        acc[department.key] = citationsByYear[year]?.[department.key] ?? 0;
+        return acc;
+      }, {}),
     })),
+    departmentKeys,
+    departmentPublicationTotals,
     specialtyDistribution: Object.entries(specialtyCounts)
       .sort((a, b) => b[1] - a[1])
       .map(([specialty, count]) => ({ specialty, count })),

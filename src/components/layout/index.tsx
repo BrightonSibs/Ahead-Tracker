@@ -9,7 +9,7 @@ import { warmJsonCache } from '@/lib/client-cache';
 import { cn } from '@/lib/utils';
 
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard', icon: '[]', exact: true },
+  { href: '/dashboard', label: 'Dashboard', icon: 'D', exact: true },
   { href: '/researchers', label: 'Researchers', icon: 'R' },
   { href: '/publications', label: 'Publications', icon: 'P' },
   { href: '/analytics', label: 'Analytics', icon: 'A' },
@@ -19,6 +19,7 @@ const NAV = [
 
 const ADMIN_NAV = [
   { href: '/admin', label: 'Overview', icon: 'O' },
+  { href: '/admin/departments', label: 'Departments', icon: 'T' },
   { href: '/admin/researchers', label: 'Manage Roster', icon: 'M' },
   { href: '/admin/sources', label: 'Data Sources', icon: 'D' },
   { href: '/admin/sync', label: 'Sync Jobs', icon: 'S' },
@@ -33,13 +34,11 @@ const NAV_DATA_PREFETCH: Record<string, string[]> = {
   '/collaborations': ['/api/collaborations'],
   '/reports': ['/api/researchers'],
   '/admin': ['/api/analytics?type=dashboard', '/api/admin/sync'],
+  '/admin/departments': ['/api/departments'],
   '/admin/researchers': ['/api/researchers'],
   '/admin/sync': ['/api/admin/sync', '/api/admin/sync/config'],
   '/admin/journals': ['/api/journals'],
 };
-
-const SHELL_PREFETCH_ROUTES = [...NAV.map(item => item.href), ...ADMIN_NAV.map(item => item.href)];
-const SHELL_PREFETCH_APIS = Array.from(new Set(Object.values(NAV_DATA_PREFETCH).flat()));
 
 function NavItem({
   href,
@@ -47,12 +46,14 @@ function NavItem({
   icon,
   exact,
   onNavigate,
+  onStartNavigate,
 }: {
   href: string;
   label: string;
   icon: string;
   exact?: boolean;
   onNavigate?: () => void;
+  onStartNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -67,67 +68,80 @@ function NavItem({
     <Link
       href={href}
       prefetch
-      onClick={onNavigate}
+      onClick={() => {
+        onStartNavigate?.();
+        onNavigate?.();
+      }}
       onMouseEnter={warmRoute}
       onMouseDown={warmRoute}
       onFocus={warmRoute}
       onTouchStart={warmRoute}
       className={cn(
-        'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-all',
-        active ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+        'flex items-center gap-3 border-l-2 px-3 py-2 text-sm font-medium transition-colors',
+        active
+          ? 'border-l-brand-100 bg-brand-800 text-white'
+          : 'border-l-transparent text-brand-100 hover:border-l-brand-200 hover:bg-brand-800 hover:text-white',
       )}
     >
-      <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-[10px] font-semibold text-gray-500">
+      <span className={cn('flex h-5 w-5 items-center justify-center text-[10px] font-semibold', active ? 'text-white' : 'text-brand-100')}>
         {icon}
       </span>
       <span className="truncate">{label}</span>
-      {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-500" />}
     </Link>
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({
+  onNavigate,
+  onStartNavigate,
+}: {
+  onNavigate?: () => void;
+  onStartNavigate?: () => void;
+}) {
   const { data: session } = useSession();
   const isAdmin = (session?.user as any)?.role === 'ADMIN';
   const isAnalyst = (session?.user as any)?.role === 'ANALYST';
 
   return (
     <>
-      <div className="border-b border-gray-100 px-4 py-4">
-        <div className="flex items-center gap-2.5">
-          <SluShield className="h-12 w-8 flex-shrink-0" />
-          <div className="min-w-0">
-            <div className="text-sm font-bold leading-tight text-gray-900">AHEAD Tracker</div>
-            <div className="truncate text-[10px] leading-tight text-gray-400">Research Output System</div>
+      <div className="border-b border-brand-500 px-4 py-5">
+        <div className="flex items-start gap-3">
+          <SluShield className="h-14 w-9 flex-shrink-0" />
+          <div className="min-w-0 space-y-3">
+            <SluWordmark />
+            <div>
+              <div className="font-display text-sm font-semibold uppercase tracking-[0.08em] text-white">AHEAD Research</div>
+              <div className="text-xs uppercase tracking-[0.16em] text-brand-100">Output System</div>
+            </div>
           </div>
         </div>
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
-        <p className="px-3 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Main</p>
+        <p className="px-3 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-200">Main</p>
         {NAV.map(item => (
-          <NavItem key={item.href} {...item} onNavigate={onNavigate} />
+          <NavItem key={item.href} {...item} onNavigate={onNavigate} onStartNavigate={onStartNavigate} />
         ))}
 
         {(isAdmin || isAnalyst) && (
           <>
-            <p className="px-3 pb-2 pt-4 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Admin</p>
+            <p className="px-3 pb-2 pt-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-200">Admin</p>
             {ADMIN_NAV.map(item => (
-              <NavItem key={item.href} {...item} onNavigate={onNavigate} />
+              <NavItem key={item.href} {...item} onNavigate={onNavigate} onStartNavigate={onStartNavigate} />
             ))}
           </>
         )}
       </nav>
 
-      <div className="border-t border-gray-100 px-3 py-3">
-        <div className="flex items-center justify-between rounded-md px-2 py-1.5">
-          <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-gray-900">{session?.user?.name || 'User'}</p>
-            <p className="text-[10px] capitalize text-gray-400">{(session?.user as any)?.role?.toLowerCase() || 'viewer'}</p>
+      <div data-user-footer className="border-t border-brand-500 px-3 py-3">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-white">{session?.user?.name || 'User'}</p>
+            <p className="truncate text-[10px] uppercase tracking-[0.12em] text-brand-200">{(session?.user as any)?.role?.toLowerCase() || 'viewer'}</p>
           </div>
           <button
             onClick={() => signOut({ callbackUrl: '/login' })}
-            className="rounded px-2 py-1 text-sm text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            className="flex-shrink-0 px-2 py-1 text-sm text-brand-100 transition-colors hover:bg-brand-800 hover:text-white"
             title="Sign out"
           >
             Out
@@ -140,7 +154,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 export function Sidebar() {
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-gray-200 bg-white shadow-sm md:flex">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-brand-900 bg-brand-700 md:flex">
       <SidebarContent />
     </aside>
   );
@@ -149,9 +163,11 @@ export function Sidebar() {
 function MobileSidebar({
   open,
   onClose,
+  onStartNavigate,
 }: {
   open: boolean;
   onClose: () => void;
+  onStartNavigate?: () => void;
 }) {
   return (
     <div className={cn('md:hidden', open ? 'pointer-events-auto' : 'pointer-events-none')}>
@@ -164,26 +180,26 @@ function MobileSidebar({
       />
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[88vw] flex-col border-r border-gray-200 bg-white shadow-xl transition-transform',
+          'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[88vw] flex-col border-r border-brand-900 bg-brand-700 transition-transform',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4">
-          <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between border-b border-brand-500 px-4 py-4">
+          <div className="flex items-start gap-3">
             <SluShield className="h-12 w-8 flex-shrink-0" />
             <div className="min-w-0">
-              <div className="text-sm font-bold leading-tight text-gray-900">AHEAD Tracker</div>
-              <div className="truncate text-[10px] leading-tight text-gray-400">Research Output System</div>
+              <SluWordmark compact />
+              <div className="mt-2 text-[11px] uppercase tracking-[0.12em] text-brand-100">AHEAD Research Output System</div>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600"
+            className="border border-brand-300 px-2 py-1 text-xs font-medium text-white"
           >
             Close
           </button>
         </div>
-        <SidebarContent onNavigate={onClose} />
+        <SidebarContent onNavigate={onClose} onStartNavigate={onStartNavigate} />
       </aside>
     </div>
   );
@@ -191,18 +207,15 @@ function MobileSidebar({
 
 function MobileHeader({ onMenu }: { onMenu: () => void }) {
   return (
-    <div className="sticky top-0 z-30 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden">
+    <div className="sticky top-0 z-30 border-b border-brand-900 bg-brand-700 px-4 py-3 md:hidden">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <SluShield className="h-10 w-7 flex-shrink-0" />
-          <div className="min-w-0">
-            <div className="text-sm font-bold text-gray-900">AHEAD Tracker</div>
-            <div className="truncate text-[10px] text-gray-400">Research Output System</div>
-          </div>
+          <SluWordmark compact />
         </div>
         <button
           onClick={onMenu}
-          className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700"
+          className="border border-brand-300 px-3 py-2 text-sm font-medium text-white"
         >
           Menu
         </button>
@@ -213,11 +226,11 @@ function MobileHeader({ onMenu }: { onMenu: () => void }) {
 
 export function TopBar({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
   return (
-    <header className="sticky top-[65px] z-20 border-b border-gray-200 bg-white px-4 py-3.5 shadow-sm md:top-0 md:px-6">
+    <header className="sticky top-[65px] z-20 border-b border-brand-100 bg-white px-4 py-5 md:top-0 md:px-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
-          <h1 className="text-base font-bold text-gray-900">{title}</h1>
-          {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
+          <h1 className="text-2xl font-semibold text-brand-900">{title}</h1>
+          {subtitle && <p className="mt-1 text-sm text-gray-600">{subtitle}</p>}
         </div>
         {actions && <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">{actions}</div>}
       </div>
@@ -227,27 +240,27 @@ export function TopBar({ title, subtitle, actions }: { title: string; subtitle?:
 
 export function PageLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const router = useRouter();
+  const [navigating, setNavigating] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      SHELL_PREFETCH_ROUTES.forEach(route => {
-        router.prefetch(route);
-      });
-      warmJsonCache(SHELL_PREFETCH_APIS, 45_000);
-    }, 120);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [router]);
+    setNavigating(false);
+  }, [pathname]);
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <div
+        className={cn(
+          'fixed left-0 right-0 top-0 z-[60] h-1 origin-left bg-brand-500 transition-all duration-300',
+          navigating ? 'scale-x-100 opacity-100' : 'scale-x-0 opacity-0',
+        )}
+      />
       <MobileHeader onMenu={() => setMobileOpen(true)} />
-      <Sidebar />
-      <MobileSidebar open={mobileOpen} onClose={() => setMobileOpen(false)} />
-      <div className="flex min-h-screen flex-col md:pl-56">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-brand-900 bg-brand-700 md:flex">
+        <SidebarContent onStartNavigate={() => setNavigating(true)} />
+      </aside>
+      <MobileSidebar open={mobileOpen} onClose={() => setMobileOpen(false)} onStartNavigate={() => setNavigating(true)} />
+      <div className="flex min-h-screen flex-col md:pl-64">
         {children}
       </div>
     </div>
@@ -256,4 +269,16 @@ export function PageLayout({ children }: { children: ReactNode }) {
 
 export function PageContent({ children, className }: { children: ReactNode; className?: string }) {
   return <main className={cn('mx-auto flex-1 w-full space-y-5 p-4 md:max-w-screen-2xl md:p-6', className)}>{children}</main>;
+}
+function SluWordmark({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <div className={cn('font-display font-semibold uppercase tracking-[0.12em] text-white', compact ? 'text-sm' : 'text-base')}>
+        Saint Louis
+      </div>
+      <div className={cn('font-display font-semibold uppercase tracking-[0.18em] text-brand-100', compact ? 'text-xs' : 'text-sm')}>
+        University
+      </div>
+    </div>
+  );
 }

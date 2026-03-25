@@ -3,29 +3,62 @@
 @tailwind utilities;
 
 @layer base {
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: auto; }
 
-  h1, h2, h3 { font-family: var(--font-display), Georgia, serif; }
+  body {
+    font-family: var(--font-body), Georgia, serif;
+    background: #f6f7f9;
+    color: #111827;
+    font-weight: 500;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display), system-ui, sans-serif;
+    letter-spacing: 0.01em;
+    font-weight: 700;
+  }
+
+  h1, h2 {
+    text-transform: uppercase;
+  }
+
+  p,
+  li,
+  label,
+  input,
+  select,
+  textarea,
+  button,
+  td,
+  th {
+    font-weight: 500;
+  }
+
+  select,
+  option {
+    font-weight: 600;
+  }
+
+  ::selection {
+    background: #d8e6ff;
+    color: #10294f;
+  }
 
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: #c8c9c7; border-radius: 0; }
   ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
-}
-
-@layer components {
-  .page-enter {
-    animation: fadeSlideUp 0.25s ease forwards;
-  }
-}
-
-@keyframes fadeSlideUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* TanStack table overrides */
 .rt-th, .rt-td { border-right: none !important; }
+
+[data-user-footer] .rounded-full,
+[data-user-footer] [class*='rounded-full'],
+[data-user-footer] img,
+[data-user-footer] svg:not(button svg) {
+  display: none !important;
+}
 
 /* Print styles */
 @media print {

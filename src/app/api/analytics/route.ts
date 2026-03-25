@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { buildObservedCitationGrowthByYear } from '@/lib/citation-metrics';
+import { getAllDepartments } from '@/lib/services/departments';
 import { getAnalyticsData } from '@/lib/services/publications';
 import { prisma } from '@/lib/prisma';
+import { departmentHexColor } from '@/lib/utils';
 import { calcHIndex } from '@/lib/utils';
 
 function buildCitationSummaries(
@@ -118,7 +120,10 @@ export async function GET(req: NextRequest) {
         .sort((a, b) => b.hIndex - a.hIndex)
         .slice(0, 8);
 
-      const depts = department ? [department] : ['AHEAD', 'HCOR'];
+      const departments = (await getAllDepartments(false))
+        .filter(item => (department ? item.code === department : true));
+
+      const depts = departments.map(item => item.code);
       const byDept = await Promise.all(
         depts.map(async dept => {
           const pubs = await prisma.publicationResearcherMatch.findMany({
@@ -131,7 +136,14 @@ export async function GET(req: NextRequest) {
             distinct: ['publicationId'],
           });
 
-          return { dept, publications: pubs.length, citations: 0 };
+          const meta = departments.find(item => item.code === dept);
+          return {
+            dept,
+            name: meta?.shortName || meta?.name || dept,
+            color: meta?.color || departmentHexColor(dept),
+            publications: pubs.length,
+            citations: 0,
+          };
         }),
       );
 

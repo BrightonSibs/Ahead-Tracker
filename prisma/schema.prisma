@@ -87,6 +87,21 @@ model Researcher {
   @@index([canonicalName])
 }
 
+model Department {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  shortName    String?
+  color        String?
+  activeStatus Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([activeStatus])
+  @@index([displayOrder])
+}
+
 model ResearcherAlias {
   id           String   @id @default(cuid())
   researcherId String

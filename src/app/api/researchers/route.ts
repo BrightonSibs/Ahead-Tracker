@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { normalizeDepartmentCode } from '@/lib/services/departments';
 import { getAllResearchers, getResearchersSummary } from '@/lib/services/researchers';
 
 export async function GET(req: NextRequest) {
@@ -33,14 +35,23 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { prisma } = await import('@/lib/prisma');
 
   try {
+    const departmentCode = normalizeDepartmentCode(String(body.department || ''));
+    if (!departmentCode) {
+      return NextResponse.json({ error: 'Department is required' }, { status: 400 });
+    }
+
+    const department = await prisma.department.findUnique({ where: { code: departmentCode } });
+    if (!department) {
+      return NextResponse.json({ error: 'Please select a valid department' }, { status: 400 });
+    }
+
     const researcher = await prisma.researcher.create({
       data: {
         facultyId: body.facultyId,
         canonicalName: body.canonicalName,
-        department: body.department,
+        department: departmentCode,
         orcid: body.orcid || null,
         sluStartDate: body.sluStartDate ? new Date(body.sluStartDate) : null,
         notes: body.notes || null,
