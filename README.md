@@ -52,6 +52,10 @@ NEXTAUTH_URL="http://localhost:3000"
 Optional:
 
 ```env
+CROSSREF_EMAIL="research@slu.edu"
+NCBI_API_KEY="..."
+ORCID_CLIENT_ID="..."
+ORCID_CLIENT_SECRET="..."
 SERPAPI_KEY="..."
 ```
 
@@ -85,6 +89,10 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+### Account settings
+
+Signed-in users can change their password from the sidebar footer or by visiting `/account/password`.
+
 ## Demo Accounts
 
 | Role | Email | Password |
@@ -117,6 +125,7 @@ npm run db:dedupe-publications
 src/
   app/
     admin/               Admin pages
+    account/             Logged-in account settings
     analytics/           Analytics dashboard
     collaborations/      Co-authorship network
     dashboard/           Main KPI dashboard
@@ -187,6 +196,14 @@ scripts/
 - CSV export
 - PDF export
 
+### Authentication and navigation
+
+- NextAuth credentials-based sign-in
+- in-app password change flow for authenticated users
+- cleaner sign-out handling and session-aware redirects
+- shared top-bar action layout across key app screens
+- lazy-loaded chart bundles for faster route transitions
+
 ## Backend Notes
 
 The backend lives in `src/app/api`.
@@ -194,6 +211,7 @@ The backend lives in `src/app/api`.
 Important routes include:
 
 - `src/app/api/analytics/route.ts`
+- `src/app/api/account/password/route.ts`
 - `src/app/api/collaborations/route.ts`
 - `src/app/api/export/route.ts`
 - `src/app/api/journals/route.ts`
@@ -237,6 +255,8 @@ Supported or partially supported sources:
 - ORCID
 - Google Scholar via SerpAPI
 - ResearchGate noted as supplemental/manual only
+
+The admin Data Sources screen uses local copies of official brand assets stored in `public/source-logos`.
 
 Sync and matching logic is implemented in `src/lib/services/sync.ts`.
 
