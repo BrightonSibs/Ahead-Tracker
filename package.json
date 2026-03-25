@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "smoke": "node scripts/smoke-check.mjs",
     "prisma:generate": "prisma generate",
     "db:setup": "prisma generate && prisma db push && ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed.ts",
     "db:push": "prisma db push",

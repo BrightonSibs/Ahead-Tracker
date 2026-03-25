@@ -41,7 +41,7 @@ npm install
 
 ### Configure environment
 
-Create `.env.local` and set at least:
+Copy `.env.example` to `.env.local` and set at least:
 
 ```env
 DATABASE_URL="file:./dev.db"
@@ -108,6 +108,7 @@ npm run dev
 npm run build
 npm run start
 npm run lint
+npm run smoke
 
 npm run db:setup
 npm run db:push
@@ -200,6 +201,7 @@ scripts/
 
 - NextAuth credentials-based sign-in
 - in-app password change flow for authenticated users
+- admin-only password reset flow from the Administration page
 - cleaner sign-out handling and session-aware redirects
 - shared top-bar action layout across key app screens
 - lazy-loaded chart bundles for faster route transitions
@@ -210,6 +212,7 @@ The backend lives in `src/app/api`.
 
 Important routes include:
 
+- `src/app/api/admin/users/reset-password/route.ts`
 - `src/app/api/analytics/route.ts`
 - `src/app/api/account/password/route.ts`
 - `src/app/api/collaborations/route.ts`
@@ -218,6 +221,7 @@ Important routes include:
 - `src/app/api/publications/route.ts`
 - `src/app/api/researchers/route.ts`
 - `src/app/api/admin/sync/route.ts`
+- `src/app/api/health/route.ts`
 
 Core query/service logic lives in:
 
@@ -259,6 +263,12 @@ Supported or partially supported sources:
 The admin Data Sources screen uses local copies of official brand assets stored in `public/source-logos`.
 
 Sync and matching logic is implemented in `src/lib/services/sync.ts`.
+
+## Operations Notes
+
+- `GET /api/health` provides a simple application and database health check for deployments.
+- `npm run smoke` performs a lightweight smoke test against `/login` and `/api/health`.
+- Demo login shortcuts are hidden automatically when `NODE_ENV=production`.
 
 ## Data Quality and Maintenance
 

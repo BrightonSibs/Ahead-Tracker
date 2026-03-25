@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { PageLayout, PageContent, TopBar } from '@/components/layout';
-import { Card, CardHeader, CardTitle, Button, Alert, Spinner } from '@/components/ui';
+import { Card, CardHeader, CardTitle, Button, Alert, Input, Spinner } from '@/components/ui';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
+import { PASSWORD_REQUIREMENTS_MESSAGE } from '@/lib/password-policy';
 import { sourceLabel, formatDate } from '@/lib/utils';
 
 export default function AdminPage() {
@@ -15,6 +16,11 @@ export default function AdminPage() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [resetMessage, setResetMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const role = (session?.user as any)?.role;
   const isAdmin = role === 'ADMIN';
@@ -61,6 +67,43 @@ export default function AdminPage() {
     const data = await fetchJsonCached<any[]>('/api/admin/sync', { force: true });
     setJobs(data);
     setSyncing(false);
+  }
+
+  async function resetUserPassword() {
+    setResetMessage(null);
+
+    if (!resetEmail || !resetPassword || !resetConfirmPassword) {
+      setResetMessage({ type: 'error', text: 'Enter the user email, new password, and confirmation.' });
+      return;
+    }
+
+    if (resetPassword !== resetConfirmPassword) {
+      setResetMessage({ type: 'error', text: 'New password and confirmation do not match.' });
+      return;
+    }
+
+    try {
+      setResettingPassword(true);
+
+      const response = await fetch('/api/admin/users/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail, newPassword: resetPassword }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setResetMessage({ type: 'error', text: result?.error || 'Unable to reset password right now.' });
+        return;
+      }
+
+      setResetPassword('');
+      setResetConfirmPassword('');
+      setResetMessage({ type: 'success', text: result?.message || `Password reset for ${resetEmail}.` });
+    } finally {
+      setResettingPassword(false);
+    }
   }
 
   const adminSections = [
@@ -270,6 +313,64 @@ export default function AdminPage() {
                   ),
                 )}
               </div>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Access Management</CardTitle>
+              </CardHeader>
+
+              {!isAdmin ? (
+                <p className="text-sm text-gray-500">Only administrators can reset user passwords.</p>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Reset a user password without changing their role or account record.
+                  </p>
+
+                  {resetMessage && (
+                    <Alert type={resetMessage.type} title={resetMessage.type === 'success' ? 'Password reset' : 'Unable to reset password'}>
+                      {resetMessage.text}
+                    </Alert>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <Input
+                      id="reset-email"
+                      label="User email"
+                      type="email"
+                      autoComplete="email"
+                      value={resetEmail}
+                      onChange={event => setResetEmail(event.target.value)}
+                      placeholder="user@slu.edu"
+                    />
+                    <Input
+                      id="reset-password"
+                      label="New password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={resetPassword}
+                      onChange={event => setResetPassword(event.target.value)}
+                      helperText={PASSWORD_REQUIREMENTS_MESSAGE}
+                    />
+                    <Input
+                      id="reset-confirm-password"
+                      label="Confirm new password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={resetConfirmPassword}
+                      onChange={event => setResetConfirmPassword(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button onClick={resetUserPassword} loading={resettingPassword}>
+                      Reset password
+                    </Button>
+                    <span className="text-xs text-gray-400">This action is recorded in the audit log.</span>
+                  </div>
+                </div>
+              )}
             </Card>
           </div>
         )}

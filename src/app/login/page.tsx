@@ -59,6 +59,7 @@ export default function LoginPage() {
   }
 
   const authPending = status === 'loading' || redirecting || !!session;
+  const showDemoCredentials = process.env.NODE_ENV !== 'production';
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-700 px-4 py-5">
@@ -114,30 +115,32 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-4 border-t border-brand-100 pt-3.5">
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-brand-700">Demo credentials</p>
-            <div className="space-y-1">
-              {[
-                { label: 'Admin', email: 'admin@slu.edu', pwd: 'admin123' },
-                { label: 'Analyst', email: 'analyst@slu.edu', pwd: 'analyst123' },
-                { label: 'Viewer', email: 'viewer@slu.edu', pwd: 'viewer123' },
-              ].map(credential => (
-                <button
-                  key={credential.label}
-                  type="button"
-                  disabled={authPending}
-                  onClick={() => {
-                    setEmail(credential.email);
-                    setPassword(credential.pwd);
-                  }}
-                  className="group flex w-full items-center justify-between border border-brand-100 bg-white px-3 py-1.5 text-left transition-colors hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <span className="text-xs font-semibold text-gray-900 group-hover:text-brand-700">{credential.label}</span>
-                  <span className="font-mono text-xs font-semibold text-gray-600">{credential.email}</span>
-                </button>
-              ))}
+          {showDemoCredentials && (
+            <div className="mt-4 border-t border-brand-100 pt-3.5">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-brand-700">Demo credentials</p>
+              <div className="space-y-1">
+                {[
+                  { label: 'Admin', email: 'admin@slu.edu', pwd: 'admin123' },
+                  { label: 'Analyst', email: 'analyst@slu.edu', pwd: 'analyst123' },
+                  { label: 'Viewer', email: 'viewer@slu.edu', pwd: 'viewer123' },
+                ].map(credential => (
+                  <button
+                    key={credential.label}
+                    type="button"
+                    disabled={authPending}
+                    onClick={() => {
+                      setEmail(credential.email);
+                      setPassword(credential.pwd);
+                    }}
+                    className="group flex w-full items-center justify-between border border-brand-100 bg-white px-3 py-1.5 text-left transition-colors hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <span className="text-xs font-semibold text-gray-900 group-hover:text-brand-700">{credential.label}</span>
+                    <span className="font-mono text-xs font-semibold text-gray-600">{credential.email}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <p className="mt-3 text-center font-display text-[11px] font-bold uppercase tracking-[0.14em] text-brand-100">
