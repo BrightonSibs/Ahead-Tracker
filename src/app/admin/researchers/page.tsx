@@ -149,6 +149,9 @@ export default function AdminResearchersPage() {
       />
       <PageContent>
         {msg && <Alert type={msg.type} title={msg.type === 'success' ? 'Success' : 'Error'}>{msg.text}</Alert>}
+        <Alert type="info" title="Matching Rule">
+          Automatic publication matching now uses only each researcher&apos;s canonical name and approved alias roster.
+        </Alert>
 
         {showAddForm && (
           <Card>

@@ -20,6 +20,12 @@ function normalizeJournalName(value) {
     .replace(/[^a-z0-9\s]/g, '');
 }
 
+function normalizeAuthorName(value) {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '');
+}
+
 function publicationScore(publication) {
   return [
     publication.doi ? 20 : 0,
@@ -79,6 +85,19 @@ function haveSharedExternalId(left, right) {
   return right.sourceRecords.some(record => record.externalId && leftIds.has(`${record.source}::${record.externalId}`));
 }
 
+function countAuthorOverlap(left, right) {
+  const leftAuthors = new Set(left.authors.map(author => normalizeAuthorName(author.authorName)).filter(Boolean));
+  const rightAuthors = new Set(right.authors.map(author => normalizeAuthorName(author.authorName)).filter(Boolean));
+
+  if (leftAuthors.size === 0 || rightAuthors.size === 0) return 0;
+
+  let overlap = 0;
+  for (const author of leftAuthors) {
+    if (rightAuthors.has(author)) overlap += 1;
+  }
+  return overlap;
+}
+
 function shouldMerge(left, right) {
   if (haveSharedResearcher(left, right)) return true;
   if (left.doi && right.doi && left.doi === right.doi) return true;
@@ -88,7 +107,7 @@ function shouldMerge(left, right) {
   if (left.publicationYear && right.publicationYear && left.publicationYear === right.publicationYear) {
     const leftJournal = normalizeJournalName(left.journalName);
     const rightJournal = normalizeJournalName(right.journalName);
-    if (!leftJournal || !rightJournal || leftJournal === rightJournal) {
+    if ((!leftJournal || !rightJournal || leftJournal === rightJournal) && countAuthorOverlap(left, right) > 0) {
       return true;
     }
   }

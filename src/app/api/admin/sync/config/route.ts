@@ -22,11 +22,21 @@ export async function GET() {
           ? 'Using NCBI_API_KEY from server environment.'
           : 'PubMed sync works without an API key, but rate limits are stricter.',
       },
+      EUROPE_PMC: {
+        configured: true,
+        reason: 'Europe PMC sync is available with no extra credentials required.',
+      },
       ORCID: {
         configured: true,
         reason: process.env.ORCID_CLIENT_ID
           ? 'ORCID client credentials are present for future member API flows.'
           : 'Public ORCID sync is available for researchers who already have ORCID iDs.',
+      },
+      OPENALEX: {
+        configured: true,
+        reason: process.env.OPENALEX_EMAIL
+          ? 'Using OPENALEX_EMAIL in the polite pool for OpenAlex requests.'
+          : 'OpenAlex sync works without credentials. Adding OPENALEX_EMAIL is recommended for polite-pool access.',
       },
       GOOGLE_SCHOLAR: {
         configured: Boolean(process.env.SERPAPI_KEY),

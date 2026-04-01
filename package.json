@@ -19,6 +19,8 @@
     "db:migrate": "prisma migrate dev",
     "db:dedupe-publications:check": "node scripts/dedupe-publications.js",
     "db:dedupe-publications": "node scripts/dedupe-publications.js --apply",
+    "db:clean-name-matches:check": "node scripts/clean-name-matches.js",
+    "db:clean-name-matches": "node scripts/clean-name-matches.js --apply",
     "postinstall": "prisma generate"
   },
   "dependencies": {

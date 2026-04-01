@@ -7,7 +7,7 @@ import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/lay
 import { Card, CardHeader, CardTitle, Button, Spinner, StatRow, Tabs, Toggle, Alert } from '@/components/ui';
 import { CitationTrendChart } from '@/components/charts/lazy';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
-import { departmentColor, confidenceBadgeColor, confidenceLabel } from '@/lib/utils';
+import { departmentColor, matchTypeBadgeColor, matchTypeLabel } from '@/lib/utils';
 
 export default function ResearcherProfilePage() {
   const params = useParams<{ id: string }>();
@@ -294,9 +294,12 @@ export default function ResearcherProfilePage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Name Variants & Aliases</CardTitle>
+                <CardTitle>Approved Name Variants</CardTitle>
                 <span className="text-xs text-gray-500">{researcher.aliases?.length || 0} recorded</span>
               </CardHeader>
+              <p className="mb-3 text-xs text-gray-500">
+                Automatic publication matching is limited to this approved name roster.
+              </p>
               {researcher.aliases?.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {researcher.aliases.map((alias: any) => (
@@ -357,8 +360,8 @@ export default function ResearcherProfilePage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${confidenceBadgeColor(match.matchConfidence)}`}>
-                          {confidenceLabel(match.matchConfidence)} ({Math.round(match.matchConfidence * 100)}%)
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${matchTypeBadgeColor(match.matchType)}`}>
+                          {matchTypeLabel(match.matchType)}
                         </span>
                       </td>
                       <td className="px-4 py-3">

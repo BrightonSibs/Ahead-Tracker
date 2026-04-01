@@ -90,6 +90,28 @@ export function confidenceLabel(confidence: number): string {
   return 'Low';
 }
 
+export function matchTypeLabel(matchType: string): string {
+  const labels: Record<string, string> = {
+    ORCID_MATCH: 'ORCID',
+    EXACT_NAME_MATCH: 'Canonical name',
+    ALIAS_MATCH: 'Approved alias',
+    MANUAL_ASSIGNMENT: 'Manual',
+  };
+
+  return labels[matchType] || matchType.replace(/_/g, ' ');
+}
+
+export function matchTypeBadgeColor(matchType: string): string {
+  const colors: Record<string, string> = {
+    ORCID_MATCH: 'border border-teal-200 bg-teal-50 text-teal-700',
+    EXACT_NAME_MATCH: 'border border-brand-200 bg-brand-50 text-brand-800',
+    ALIAS_MATCH: 'border border-gray-300 bg-white text-gray-800',
+    MANUAL_ASSIGNMENT: 'border border-amber-200 bg-amber-50 text-amber-700',
+  };
+
+  return colors[matchType] || 'border border-gray-300 bg-white text-gray-700';
+}
+
 const DEPARTMENT_BADGE_CLASSES = [
   'border border-brand-200 bg-brand-50 text-brand-800',
   'border border-teal-200 bg-teal-50 text-teal-800',
@@ -157,6 +179,8 @@ export function sourceLabel(source: string): string {
     CROSSREF: 'CrossRef',
     ORCID: 'ORCID',
     PUBMED: 'PubMed',
+    EUROPE_PMC: 'Europe PMC',
+    OPENALEX: 'OpenAlex',
     RESEARCHGATE: 'ResearchGate',
     MANUAL: 'Manual',
     CSV_IMPORT: 'CSV Import',
@@ -170,6 +194,8 @@ export function sourceBadgeColor(source: string): string {
     CROSSREF: 'border border-gray-300 bg-white text-gray-700',
     ORCID: 'border border-gray-300 bg-gray-50 text-gray-700',
     PUBMED: 'border border-slate-300 bg-slate-50 text-slate-700',
+    EUROPE_PMC: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+    OPENALEX: 'border border-indigo-200 bg-indigo-50 text-indigo-700',
     RESEARCHGATE: 'border border-gray-300 bg-white text-gray-700',
     MANUAL: 'border border-gray-300 bg-white text-gray-600',
     CSV_IMPORT: 'border border-gray-300 bg-gray-50 text-gray-700',

@@ -109,7 +109,7 @@ export default function AdminPage() {
   const adminSections = [
     { href: '/admin/researchers', label: 'Manage Roster', icon: 'R', desc: 'Add, edit, deactivate researchers, and manage aliases.' },
     { href: '/admin/departments', label: 'Departments', icon: 'D', desc: 'Add, edit, and retire departments without code changes.' },
-    { href: '/admin/sources', label: 'Data Sources', icon: 'S', desc: 'Configure API credentials for CrossRef, PubMed, ORCID, and Scholar sync.' },
+    { href: '/admin/sources', label: 'Data Sources', icon: 'S', desc: 'Configure CrossRef, PubMed, Europe PMC, ORCID, OpenAlex, and Scholar sync settings.' },
     { href: '/admin/sync', label: 'Sync Jobs', icon: 'J', desc: 'Trigger and monitor sync jobs across connected data sources.' },
     { href: '/admin/journals', label: 'Journal Impact Factors', icon: 'I', desc: 'Manage journal impact factor records and import CSV files.' },
   ];
@@ -203,16 +203,29 @@ export default function AdminPage() {
               </CardHeader>
 
               <div className="mb-4 space-y-2">
-                {['CROSSREF', 'PUBMED', 'ORCID', 'GOOGLE_SCHOLAR'].map(source => (
+                {['CROSSREF', 'PUBMED', 'EUROPE_PMC', 'ORCID', 'OPENALEX', 'GOOGLE_SCHOLAR'].map(source => (
                   <div
                     key={source}
                     className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 p-2.5"
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${source === 'GOOGLE_SCHOLAR' ? 'bg-blue-400' : 'bg-green-400'}`} />
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          source === 'GOOGLE_SCHOLAR'
+                            ? 'bg-blue-400'
+                            : source === 'OPENALEX'
+                              ? 'bg-indigo-400'
+                              : source === 'EUROPE_PMC'
+                                ? 'bg-emerald-400'
+                                : 'bg-green-400'
+                        }`}
+                      />
                       <span className="text-sm text-gray-700">{sourceLabel(source)}</span>
                       {source === 'GOOGLE_SCHOLAR' && (
                         <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">SerpAPI</span>
+                      )}
+                      {source === 'OPENALEX' && (
+                        <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-600">ORCID / author ID</span>
                       )}
                     </div>
                     <Button

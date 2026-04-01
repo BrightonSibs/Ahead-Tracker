@@ -9,12 +9,12 @@ import { Card, CardHeader, CardTitle, Button, Spinner, Alert, StatRow } from '@/
 import { CitationTrendChart } from '@/components/charts/lazy';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import {
-  confidenceBadgeColor,
-  confidenceLabel,
   sourceBadgeColor,
   sourceLabel,
   departmentColor,
   formatDate,
+  matchTypeBadgeColor,
+  matchTypeLabel,
 } from '@/lib/utils';
 
 type ResearcherOption = {
@@ -434,6 +434,9 @@ export default function PublicationDetailPage() {
                 <CardTitle>Matched Researchers</CardTitle>
                 <span className="text-xs text-gray-400">{pub.matches?.length || 0}</span>
               </CardHeader>
+              <p className="mb-3 text-xs text-gray-500">
+                Automatic matches are restricted to canonical names and approved aliases.
+              </p>
               <div className="space-y-3">
                 {pub.matches?.map((match: any) => (
                   <div key={match.id} className="flex items-start gap-2.5">
@@ -452,13 +455,12 @@ export default function PublicationDetailPage() {
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${departmentColor(match.researcher.department)}`}>
                           {match.researcher.department}
                         </span>
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${confidenceBadgeColor(match.matchConfidence)}`}>
-                          {confidenceLabel(match.matchConfidence)}
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${matchTypeBadgeColor(match.matchType)}`}>
+                          {matchTypeLabel(match.matchType)}
                         </span>
                         {match.manuallyConfirmed && <span className="text-[10px] text-green-600">Confirmed</span>}
                         {match.manuallyExcluded && <span className="text-[10px] text-red-500">Excluded</span>}
                       </div>
-                      <p className="mt-0.5 text-[10px] text-gray-400">{match.matchType?.replace(/_/g, ' ')}</p>
                     </div>
                     {canEdit && (
                       match.manuallyExcluded ? (

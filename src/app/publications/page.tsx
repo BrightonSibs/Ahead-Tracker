@@ -12,7 +12,9 @@ import type { DepartmentSummary, PublicationSummary, PaginatedResult } from '@/t
 const SOURCE_OPTIONS = [
   { value: 'CROSSREF', label: 'CrossRef' },
   { value: 'PUBMED', label: 'PubMed' },
+  { value: 'EUROPE_PMC', label: 'Europe PMC' },
   { value: 'ORCID', label: 'ORCID' },
+  { value: 'OPENALEX', label: 'OpenAlex' },
   { value: 'GOOGLE_SCHOLAR', label: 'Google Scholar' },
   { value: 'MANUAL', label: 'Manual' },
 ];
@@ -268,6 +270,10 @@ function PublicationsPageContent() {
               </button>
             )}
           </div>
+
+          <p className="mt-3 text-xs text-gray-500">
+            Researcher links are limited to canonical names and approved alias variants.
+          </p>
 
           {get('sluOnly') === 'true' && (
             <div className="mt-3 flex gap-2">

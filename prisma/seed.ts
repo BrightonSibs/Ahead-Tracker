@@ -14,6 +14,8 @@ const DataSource = {
   CROSSREF: 'CROSSREF',
   ORCID: 'ORCID',
   PUBMED: 'PUBMED',
+  EUROPE_PMC: 'EUROPE_PMC',
+  OPENALEX: 'OPENALEX',
   RESEARCHGATE: 'RESEARCHGATE',
   MANUAL: 'MANUAL',
   CSV_IMPORT: 'CSV_IMPORT',
@@ -43,13 +45,39 @@ type FacultyRecord = {
   orcid: string | null;
   sluStartDate: Date | null;
   aliases: Array<{ aliasName: string; aliasType: string }>;
+  identifiers?: Array<{ identifierType: string; value: string; verified?: boolean }>;
   specialties: string[];
   notes?: string | null;
 };
 
+function normalizeMatchName(value: string) {
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '');
+}
+
 const DEPARTMENTS = [
   { code: 'AHEAD', name: 'AHEAD', shortName: 'AHEAD', color: '#1a6fb5', displayOrder: 1 },
   { code: 'HCOR', name: 'HCOR', shortName: 'HCOR', color: '#14b8a6', displayOrder: 2 },
+];
+
+const DIVYA_APPROVED_ALIASES: FacultyRecord['aliases'] = [
+  { aliasName: 'Divya S. Subramaniam', aliasType: AliasType.NAME_VARIANT },
+  { aliasName: 'DS Subramaniam', aliasType: AliasType.INITIALS_ONLY },
+];
+
+const NOOR_APPROVED_ALIASES: FacultyRecord['aliases'] = [
+  { aliasName: 'Noor R. Al-Hammadi', aliasType: AliasType.NAME_VARIANT },
+  { aliasName: 'NR Al-Hammadi', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'NR Al Hammadi', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'N Al-Hammadi', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'N Al Hammadi', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'Al-Hammadi N', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'Al Hammadi N', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'Al-Hammadi, N.', aliasType: AliasType.INITIALS_ONLY },
+  { aliasName: 'N. Al-Hammadi', aliasType: AliasType.INITIALS_ONLY },
 ];
 
 // ─── FACULTY ROSTER (authoritative from spreadsheet) ──────────────────────
@@ -60,9 +88,9 @@ const FACULTY: FacultyRecord[] = [
     department: 'HCOR',
     orcid: null,
     sluStartDate: new Date('2018-08-01'),
-    aliases: [
-      { aliasName: 'Divya S. Subramaniam', aliasType: AliasType.NAME_VARIANT },
-      { aliasName: 'DS Subramaniam', aliasType: AliasType.INITIALS_ONLY },
+    aliases: DIVYA_APPROVED_ALIASES,
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: '8Z3FixUAAAAJ', verified: true },
     ],
     specialties: ['Health Economics', 'Outcomes Research'],
   },
@@ -95,6 +123,9 @@ const FACULTY: FacultyRecord[] = [
     orcid: null,
     sluStartDate: new Date('2019-08-01'),
     aliases: [],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'glOv_YEAAAAJ', verified: true },
+    ],
     specialties: ['Biostatistics', 'Health Data Science'],
   },
   {
@@ -104,6 +135,9 @@ const FACULTY: FacultyRecord[] = [
     orcid: null,
     sluStartDate: new Date('2017-01-01'),
     aliases: [],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: '9fWq1CYAAAAJ', verified: true },
+    ],
     specialties: ['Comparative Effectiveness', 'Pharmacoepidemiology'],
   },
   {
@@ -112,12 +146,9 @@ const FACULTY: FacultyRecord[] = [
     department: 'HCOR',
     orcid: null,
     sluStartDate: new Date('2020-08-01'),
-    aliases: [
-      { aliasName: 'Noor R. Al-Hammadi', aliasType: AliasType.NAME_VARIANT },
-      { aliasName: 'NR Al-Hammadi', aliasType: AliasType.INITIALS_ONLY },
-      { aliasName: 'NR Al Hammadi', aliasType: AliasType.NAME_VARIANT },
-      { aliasName: 'N Al-Hammadi', aliasType: AliasType.INITIALS_ONLY },
-      { aliasName: 'N Al Hammadi', aliasType: AliasType.INITIALS_ONLY },
+    aliases: NOOR_APPROVED_ALIASES,
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'ikTatVwAAAAJ', verified: true },
     ],
     specialties: ['Outcomes Research', 'Chronic Disease Management'],
   },
@@ -134,6 +165,9 @@ const FACULTY: FacultyRecord[] = [
       { aliasName: 'Paula M Stirnemann', aliasType: AliasType.MAIDEN_NAME },
       { aliasName: 'PM Stirnemann', aliasType: AliasType.MAIDEN_NAME },
     ],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'nW0czhcAAAAJ', verified: true },
+    ],
     specialties: ['Patient-Reported Outcomes', 'Quality of Life'],
   },
   {
@@ -146,6 +180,9 @@ const FACULTY: FacultyRecord[] = [
       { aliasName: 'Dipti P Subramaniam', aliasType: AliasType.NAME_VARIANT },
       { aliasName: 'DP Subramaniam', aliasType: AliasType.INITIALS_ONLY },
     ],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'qkXLEqwAAAAJ', verified: true },
+    ],
     specialties: ['Health Economics', 'Real-World Evidence'],
   },
   {
@@ -156,6 +193,9 @@ const FACULTY: FacultyRecord[] = [
     sluStartDate: new Date('2021-01-01'),
     aliases: [
       { aliasName: 'B Rahmani', aliasType: AliasType.INITIALS_ONLY },
+    ],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'Mz_j2oQAAAAJ', verified: true },
     ],
     specialties: ['Health Services Research', 'Mental Health'],
   },
@@ -168,6 +208,9 @@ const FACULTY: FacultyRecord[] = [
     aliases: [
       { aliasName: 'Jason Doherty', aliasType: AliasType.NAME_VARIANT },
       { aliasName: 'JM Doherty', aliasType: AliasType.INITIALS_ONLY },
+    ],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'LXVvo6oAAAAJ', verified: true },
     ],
     specialties: ['Pharmacoeconomics', 'Decision Modeling'],
   },
@@ -190,6 +233,9 @@ const FACULTY: FacultyRecord[] = [
       { aliasName: 'ES Armbrecht', aliasType: AliasType.INITIALS_ONLY },
       { aliasName: 'E Armbrecht', aliasType: AliasType.INITIALS_ONLY },
     ],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: 'orDKmXYAAAAJ', verified: true },
+    ],
     specialties: ['Health Technology Assessment', 'Aging Research'],
   },
   {
@@ -200,10 +246,11 @@ const FACULTY: FacultyRecord[] = [
     sluStartDate: new Date('2015-01-01'),
     aliases: [
       { aliasName: 'T Chrusciel', aliasType: AliasType.ABBREVIATED },
-      { aliasName: 'T. Chrusciel', aliasType: AliasType.ABBREVIATED },
       { aliasName: 'TP Chrusciel', aliasType: AliasType.INITIALS_ONLY },
       { aliasName: 'Tim P Chrusciel', aliasType: AliasType.NAME_VARIANT },
-      { aliasName: 'Timothy Chrusciel', aliasType: AliasType.NAME_VARIANT },
+    ],
+    identifiers: [
+      { identifierType: 'GOOGLE_SCHOLAR_AUTHOR_ID', value: '_yxejSwAAAAJ', verified: true },
     ],
     specialties: ['Biostatistics', 'Clinical Research Methods'],
   },
@@ -786,12 +833,29 @@ async function main() {
     });
     researcherMap[fac.facultyId] = researcher.id;
 
-    // ORCID identifier
-    if (fac.orcid) {
+    const identifiersToSeed = [
+      ...(fac.orcid ? [{ identifierType: 'ORCID', value: fac.orcid, verified: true }] : []),
+      ...(fac.identifiers || []),
+    ];
+
+    for (const identifier of identifiersToSeed) {
       await prisma.researcherIdentifier.upsert({
-        where: { identifierType_value: { identifierType: 'ORCID', value: fac.orcid } },
-        update: {},
-        create: { researcherId: researcher.id, identifierType: 'ORCID', value: fac.orcid, verified: true },
+        where: {
+          identifierType_value: {
+            identifierType: identifier.identifierType,
+            value: identifier.value,
+          },
+        },
+        update: {
+          researcherId: researcher.id,
+          verified: identifier.verified ?? true,
+        },
+        create: {
+          researcherId: researcher.id,
+          identifierType: identifier.identifierType,
+          value: identifier.value,
+          verified: identifier.verified ?? true,
+        },
       });
     }
 
@@ -867,16 +931,20 @@ async function main() {
       // Determine match type
       const researcher = FACULTY.find(f => f.facultyId === facultyId)!;
       const matchedAuthor = pub.authorNames[pub.facultyIds.indexOf(facultyId)];
-      const isExact = matchedAuthor === researcher.canonicalName;
-      const isAlias = researcher.aliases.some(a => a.aliasName === matchedAuthor);
+      const normalizedMatchedAuthor = normalizeMatchName(matchedAuthor);
+      const isExact = normalizeMatchName(researcher.canonicalName) === normalizedMatchedAuthor;
+      const isAlias = researcher.aliases.some(a => normalizeMatchName(a.aliasName) === normalizedMatchedAuthor);
       const isOrcid = !!researcher.orcid;
+
+      if (!isOrcid && !isExact && !isAlias) {
+        continue;
+      }
 
       const matchType = isOrcid ? MatchType.ORCID_MATCH
         : isExact ? MatchType.EXACT_NAME_MATCH
-        : isAlias ? MatchType.ALIAS_MATCH
-        : MatchType.FUZZY_MATCH;
+        : MatchType.ALIAS_MATCH;
 
-      const confidence = isOrcid ? 1.0 : isExact ? 0.98 : isAlias ? 0.92 : 0.75;
+      const confidence = isOrcid ? 1.0 : isExact ? 0.98 : 0.92;
 
       // SLU tenure check
       const sluStart = researcher.sluStartDate;

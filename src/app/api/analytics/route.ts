@@ -69,32 +69,26 @@ export async function GET(req: NextRequest) {
             activeStatus: true,
             ...(department ? { department } : {}),
           },
-          include: {
-            matches: {
-              where: matchWhere,
-              include: {
-                publication: {
-                  include: { citations: { orderBy: { capturedAt: 'desc' }, take: 1 } },
-                },
-              },
-            },
+          select: {
+            id: true,
+            canonicalName: true,
+            department: true,
           },
           orderBy: { canonicalName: 'asc' },
         }),
         prisma.publicationResearcherMatch.findMany({
           where: matchWhere,
-          select: { publicationId: true },
-          distinct: ['publicationId'],
+          select: { publicationId: true, researcherId: true },
         }),
       ]);
 
-      const publicationIds = publicationMatches.map(match => match.publicationId);
-      const pubCount = publicationIds.length;
+      const uniquePublicationIds = Array.from(new Set(publicationMatches.map(match => match.publicationId)));
+      const pubCount = uniquePublicationIds.length;
       const thisYear = new Date().getFullYear();
 
-      const citationHistory = publicationIds.length > 0
+      const citationHistory = uniquePublicationIds.length > 0
         ? await prisma.citation.findMany({
-            where: { publicationId: { in: publicationIds } },
+            where: { publicationId: { in: uniquePublicationIds } },
             orderBy: [
               { publicationId: 'asc' },
               { capturedAt: 'asc' },
@@ -106,9 +100,26 @@ export async function GET(req: NextRequest) {
       const { totalCitations, citationsThisYear } = buildCitationSummaries(citationHistory, thisYear);
       const avgCit = pubCount > 0 ? (totalCitations / pubCount).toFixed(1) : '0';
 
+      const latestByPublication = new Map<string, number>();
+      for (const citation of citationHistory) {
+        latestByPublication.set(citation.publicationId, citation.citationCount);
+      }
+
+      const publicationIdsByResearcher = new Map<string, string[]>();
+      const publicationIdsByDepartment = new Map<string, Set<string>>();
+      for (const match of publicationMatches) {
+        const researcherPublications = publicationIdsByResearcher.get(match.researcherId);
+        if (researcherPublications) {
+          researcherPublications.push(match.publicationId);
+        } else {
+          publicationIdsByResearcher.set(match.researcherId, [match.publicationId]);
+        }
+      }
+
       const topResearchers = researchers
         .map(researcher => {
-          const citations = researcher.matches.map(match => match.publication.citations[0]?.citationCount ?? 0);
+          const publicationIds = publicationIdsByResearcher.get(researcher.id) || [];
+          const citations = publicationIds.map(publicationId => latestByPublication.get(publicationId) ?? 0);
           return {
             id: researcher.id,
             name: researcher.canonicalName,
@@ -123,29 +134,23 @@ export async function GET(req: NextRequest) {
       const departments = (await getAllDepartments(false))
         .filter(item => (department ? item.code === department : true));
 
-      const depts = departments.map(item => item.code);
-      const byDept = await Promise.all(
-        depts.map(async dept => {
-          const pubs = await prisma.publicationResearcherMatch.findMany({
-            where: {
-              manuallyExcluded: false,
-              ...(sluOnly ? { includedInSluOutput: true } : {}),
-              researcher: { department: dept },
-            },
-            select: { publicationId: true },
-            distinct: ['publicationId'],
-          });
+      const researcherDepartmentById = new Map(researchers.map(researcher => [researcher.id, researcher.department]));
+      for (const match of publicationMatches) {
+        const dept = researcherDepartmentById.get(match.researcherId);
+        if (!dept) continue;
+        if (!publicationIdsByDepartment.has(dept)) {
+          publicationIdsByDepartment.set(dept, new Set());
+        }
+        publicationIdsByDepartment.get(dept)!.add(match.publicationId);
+      }
 
-          const meta = departments.find(item => item.code === dept);
-          return {
-            dept,
-            name: meta?.shortName || meta?.name || dept,
-            color: meta?.color || departmentHexColor(dept),
-            publications: pubs.length,
-            citations: 0,
-          };
-        }),
-      );
+      const byDept = departments.map(item => ({
+        dept: item.code,
+        name: item.shortName || item.name || item.code,
+        color: item.color || departmentHexColor(item.code),
+        publications: publicationIdsByDepartment.get(item.code)?.size ?? 0,
+        citations: 0,
+      }));
 
       return NextResponse.json({
         totalPublications: pubCount,

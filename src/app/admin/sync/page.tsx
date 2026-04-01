@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, Button, Alert, Spinner } from '@/component
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
 import { sourceLabel, formatDate } from '@/lib/utils';
 
-const SOURCES = ['CROSSREF', 'PUBMED', 'ORCID', 'GOOGLE_SCHOLAR'];
+const SOURCES = ['CROSSREF', 'PUBMED', 'EUROPE_PMC', 'ORCID', 'OPENALEX', 'GOOGLE_SCHOLAR'];
 
 type MessageTone = 'success' | 'warning' | 'error';
 type SourceConfig = Record<string, { configured: boolean; reason?: string }>;
@@ -29,12 +29,20 @@ function summarizeSourceError(source: string, message: string) {
       return `${labelPrefix}PubMed returned a server error while fetching publications. Retry in a few minutes.`;
     }
 
+    if (source === 'EUROPE_PMC') {
+      return `${labelPrefix}Europe PMC returned a server error while fetching publications. Retry in a few minutes.`;
+    }
+
     if (source === 'CROSSREF') {
       return `${labelPrefix}CrossRef returned a server error while fetching publications. Retry in a few minutes.`;
     }
 
     if (source === 'ORCID') {
       return `${labelPrefix}ORCID returned a server error while fetching works. Retry in a few minutes.`;
+    }
+
+    if (source === 'OPENALEX') {
+      return `${labelPrefix}OpenAlex returned a server error while fetching works. Retry in a few minutes.`;
     }
 
     if (source === 'GOOGLE_SCHOLAR') {
@@ -186,6 +194,11 @@ export default function AdminSyncPage() {
                         {configured ? 'SERPAPI_KEY detected on server' : 'Requires SERPAPI_KEY in .env.local'}
                       </p>
                     )}
+                    {src === 'OPENALEX' && (
+                      <p className="mt-0.5 text-[10px] text-indigo-600">
+                        Best with ORCID or OPENALEX_AUTHOR_ID on the researcher profile
+                      </p>
+                    )}
                   </div>
                   <span
                     className={`w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0 ${
@@ -309,10 +322,16 @@ export default function AdminSyncPage() {
               <p>
                 <strong className="text-gray-800">PubMed</strong> - Automatic sync is supported and ingests PubMed-indexed publications through author-based searches.
               </p>
+              <p>
+                <strong className="text-gray-800">Europe PMC</strong> - Automatic sync is supported for biomedical literature and adds PMID/PMCID-aware matching on top of strict author checks.
+              </p>
             </div>
             <div className="space-y-2">
               <p>
                 <strong className="text-gray-800">ORCID</strong> - Automatic sync is supported for researchers who have ORCID iDs and provides the highest-confidence identity match.
+              </p>
+              <p>
+                <strong className="text-gray-800">OpenAlex</strong> - Automatic sync is supported for researchers who have ORCID iDs or verified OpenAlex author IDs, with stronger duplicate reuse across sources.
               </p>
               <p>
                 <strong className="text-gray-800">Google Scholar</strong> - Automatic sync is supported through SerpAPI when{' '}

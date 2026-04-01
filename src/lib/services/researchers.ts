@@ -21,6 +21,31 @@ function buildResearcherWhere(filters?: {
   };
 }
 
+async function getLatestCitationCountMap(publicationIds: string[]) {
+  if (publicationIds.length === 0) {
+    return new Map<string, number>();
+  }
+
+  const citations = await prisma.citation.findMany({
+    where: { publicationId: { in: publicationIds } },
+    orderBy: [
+      { publicationId: 'asc' },
+      { capturedAt: 'desc' },
+      { id: 'desc' },
+    ],
+    select: { publicationId: true, citationCount: true },
+  });
+
+  const latestByPublication = new Map<string, number>();
+  for (const citation of citations) {
+    if (!latestByPublication.has(citation.publicationId)) {
+      latestByPublication.set(citation.publicationId, citation.citationCount);
+    }
+  }
+
+  return latestByPublication;
+}
+
 export async function getAllResearchers(filters?: {
   department?: string;
   search?: string;
@@ -31,23 +56,39 @@ export async function getAllResearchers(filters?: {
     include: {
       aliases: true,
       specialties: { include: { specialty: true } },
-      matches: {
-        where: { manuallyExcluded: false },
-        include: {
-          publication: {
-            include: {
-              citations: { orderBy: { capturedAt: 'desc' }, take: 1 },
-            },
-          },
-        },
-      },
     },
     orderBy: { canonicalName: 'asc' },
   });
 
+  const researcherIds = researchers.map(researcher => researcher.id);
+  const matches = researcherIds.length > 0
+    ? await prisma.publicationResearcherMatch.findMany({
+        where: {
+          researcherId: { in: researcherIds },
+          manuallyExcluded: false,
+        },
+        select: {
+          researcherId: true,
+          publicationId: true,
+        },
+      })
+    : [];
+
+  const latestCitations = await getLatestCitationCountMap(matches.map(match => match.publicationId));
+  const matchesByResearcher = new Map<string, string[]>();
+
+  for (const match of matches) {
+    const existing = matchesByResearcher.get(match.researcherId);
+    if (existing) {
+      existing.push(match.publicationId);
+    } else {
+      matchesByResearcher.set(match.researcherId, [match.publicationId]);
+    }
+  }
+
   return researchers.map(r => {
-    const validMatches = r.matches.filter(m => !m.manuallyExcluded);
-    const citations = validMatches.map(m => m.publication.citations[0]?.citationCount ?? 0);
+    const publicationIds = matchesByResearcher.get(r.id) || [];
+    const citations = publicationIds.map(publicationId => latestCitations.get(publicationId) ?? 0);
     const totalCitations = citations.reduce((a, b) => a + b, 0);
     const hIndex = calcHIndex(citations);
     const i10Index = calcI10Index(citations);
@@ -70,7 +111,7 @@ export async function getAllResearchers(filters?: {
       activeStatus: r.activeStatus,
       notes: r.notes,
       aliasCount: r.aliases.length,
-      publicationCount: validMatches.length,
+      publicationCount: publicationIds.length,
       totalCitations,
       hIndex,
       i10Index,
@@ -245,26 +286,41 @@ export async function getResearcherById(id: string, sluOnly = false) {
 export async function getCollaborationNetwork(department?: string) {
   const researchers = await prisma.researcher.findMany({
     where: department ? { department } : {},
-    include: {
-      matches: {
-        where: { manuallyExcluded: false },
-        include: {
-          publication: {
-            include: {
-              citations: { orderBy: { capturedAt: 'desc' }, take: 1 },
-            },
-          },
-        },
-      },
+    select: {
+      id: true,
+      canonicalName: true,
+      department: true,
     },
   });
 
+  const researcherIds = researchers.map(researcher => researcher.id);
+  const matches = researcherIds.length > 0
+    ? await prisma.publicationResearcherMatch.findMany({
+        where: {
+          researcherId: { in: researcherIds },
+          manuallyExcluded: false,
+        },
+        select: {
+          researcherId: true,
+          publicationId: true,
+        },
+      })
+    : [];
+
+  const latestCitations = await getLatestCitationCountMap(matches.map(match => match.publicationId));
+  const matchesByResearcher = new Map<string, string[]>();
+
   // Build co-authorship edges
   const pubToResearchers: Record<string, string[]> = {};
-  for (const r of researchers) {
-    for (const m of r.matches) {
-      if (!pubToResearchers[m.publicationId]) pubToResearchers[m.publicationId] = [];
-      pubToResearchers[m.publicationId].push(r.id);
+  for (const match of matches) {
+    if (!pubToResearchers[match.publicationId]) pubToResearchers[match.publicationId] = [];
+    pubToResearchers[match.publicationId].push(match.researcherId);
+
+    const existing = matchesByResearcher.get(match.researcherId);
+    if (existing) {
+      existing.push(match.publicationId);
+    } else {
+      matchesByResearcher.set(match.researcherId, [match.publicationId]);
     }
   }
 
@@ -283,9 +339,9 @@ export async function getCollaborationNetwork(department?: string) {
     name: r.canonicalName,
     canonicalName: r.canonicalName,
     department: r.department,
-    publicationCount: r.matches.length,
-    totalCitations: r.matches.reduce((sum, match) => sum + getLatestCitationCount(match.publication.citations), 0),
-    hIndex: calcHIndex(r.matches.map(match => getLatestCitationCount(match.publication.citations))),
+    publicationCount: (matchesByResearcher.get(r.id) || []).length,
+    totalCitations: (matchesByResearcher.get(r.id) || []).reduce((sum, publicationId) => sum + (latestCitations.get(publicationId) ?? 0), 0),
+    hIndex: calcHIndex((matchesByResearcher.get(r.id) || []).map(publicationId => latestCitations.get(publicationId) ?? 0)),
   }));
 
   const edges = Object.entries(edgeMap).map(([key, weight]) => {
