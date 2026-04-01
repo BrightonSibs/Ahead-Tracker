@@ -56,6 +56,7 @@ CROSSREF_EMAIL="research@slu.edu"
 NCBI_API_KEY="..."
 ORCID_CLIENT_ID="..."
 ORCID_CLIENT_SECRET="..."
+OPENALEX_EMAIL="research@slu.edu"
 SERPAPI_KEY="..."
 ```
 
@@ -116,6 +117,8 @@ npm run db:seed
 npm run db:studio
 npm run db:migrate
 
+npm run db:clean-name-matches:check
+npm run db:clean-name-matches
 npm run db:dedupe-publications:check
 npm run db:dedupe-publications
 ```
@@ -154,6 +157,7 @@ prisma/
   schema.prisma
   seed.ts
 scripts/
+  clean-name-matches.js
   dedupe-publications.js
 ```
 
@@ -170,10 +174,11 @@ scripts/
 ### Publication management
 
 - publication metadata from multiple sources
-- researcher-publication matching with confidence values
+- strict researcher-publication matching using canonical names, approved aliases, ORCID, and verified profile identifiers
 - manual correction tools for wrong matches
 - exclusion of pre-tenure output
 - admin edit/delete workflow for bad imports
+- duplicate prevention across sources using DOI, PubMed ID, source-record IDs, and title/year/journal/author overlap checks
 
 ### Citations
 
@@ -256,7 +261,9 @@ Supported or partially supported sources:
 
 - CrossRef
 - PubMed
+- Europe PMC
 - ORCID
+- OpenAlex
 - Google Scholar via SerpAPI
 - ResearchGate noted as supplemental/manual only
 
@@ -281,6 +288,17 @@ npm run db:dedupe-publications:check
 npm run db:dedupe-publications
 ```
 
+### Strict name enforcement
+
+The platform includes a separate cleanup path for enforcing approved researcher names and aliases:
+
+```bash
+npm run db:clean-name-matches:check
+npm run db:clean-name-matches
+```
+
+This removes researcher-publication links that do not match the configured canonical name, approved alias list, ORCID, or verified source identifier rules.
+
 ### Citation trend interpretation
 
 The dashboard's citation trend charts use observed growth from stored snapshots. They should be read as growth recorded by the system over time, not as a guaranteed full historical citation timeline when earlier snapshots do not exist.
@@ -297,6 +315,8 @@ For production, set:
 - `DATABASE_URL`
 - `NEXTAUTH_SECRET`
 - `NEXTAUTH_URL`
+- `OPENALEX_EMAIL` if OpenAlex sync should run in the polite pool
 - `SERPAPI_KEY` if Google Scholar sync is needed
+- `NCBI_API_KEY` if you want higher PubMed throughput
 
 SQLite works for local development. Prisma makes it possible to move to PostgreSQL later if needed.
