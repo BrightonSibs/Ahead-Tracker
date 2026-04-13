@@ -293,7 +293,7 @@ export default function PublicationDetailPage() {
                   { label: 'Year', value: pub.publicationYear ?? '-' },
                   { label: 'Volume / Issue', value: [pub.volume, pub.issue].filter(Boolean).join(' / ') || '-' },
                   { label: 'Pages', value: pub.pages || '-' },
-                  { label: 'Impact Factor', value: pub.impactFactor ? pub.impactFactor.toFixed(1) : '-' },
+                  { label: 'Impact Factor', value: pub.impactFactor != null ? pub.impactFactor.toFixed(1) : '-' },
                   { label: 'Primary Source', value: sourceLabel(pub.sourcePrimary) },
                 ].map(({ label, value }) => (
                   <div key={label}>

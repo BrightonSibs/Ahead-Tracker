@@ -1,10 +1,47 @@
 import { prisma } from '@/lib/prisma';
-import { buildObservedCitationGrowthByYear } from '@/lib/citation-metrics';
+import {
+  buildCumulativeCitationCountByYear,
+  buildObservedCitationGrowthByYear,
+} from '@/lib/citation-metrics';
 import { getAllDepartments } from '@/lib/services/departments';
 import { departmentHexColor } from '@/lib/utils';
 import type { FilterState, PaginatedResult, PublicationSummary } from '@/types';
 
 type PublicationWithRelations = Awaited<ReturnType<typeof fetchPublications>>[number];
+type JournalMetricLookup = {
+  exact: Map<string, { impactFactor: number | null; quartile: string | null; year: number }>;
+  byNormalizedName: Map<string, Array<{ impactFactor: number | null; quartile: string | null; year: number }>>;
+};
+
+function decodeHtmlEntities(value: string) {
+  let normalized = value;
+  const replacements: Array<[RegExp, string]> = [
+    [/&amp;/gi, '&'],
+    [/&lt;/gi, '<'],
+    [/&gt;/gi, '>'],
+    [/&quot;/gi, '"'],
+    [/&#39;/gi, "'"],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  return normalized;
+}
+
+function normalizeJournalName(value: string | null | undefined) {
+  if (!value) return null;
+
+  const normalized = decodeHtmlEntities(value)
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .replace(/[.,;:]+$/g, '')
+    .trim()
+    .toLowerCase();
+
+  return normalized || null;
+}
 
 function toRangeStart(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
@@ -42,34 +79,25 @@ async function fetchPublications(where: any, skip?: number, take?: number) {
   });
 }
 
-async function fetchJournalMetricMap(
+async function fetchJournalMetricLookup(
   publications: Array<{ journalName: string | null; publicationYear: number | null }>,
 ) {
-  const uniquePairs = Array.from(
-    new Map(
+  const journalNames = Array.from(
+    new Set(
       publications
-        .filter(publication => publication.journalName)
-        .map(publication => [
-          getImpactMetricKey(publication.journalName, publication.publicationYear),
-          {
-            journalName: publication.journalName as string,
-            year: getImpactMetricYear(publication.publicationYear),
-          },
-        ]),
-    ).values(),
+        .map(publication => publication.journalName)
+        .filter((journalName): journalName is string => Boolean(journalName)),
+    ),
   );
 
-  if (uniquePairs.length === 0) {
-    return new Map<string, { impactFactor: number | null; quartile: string | null }>();
+  if (journalNames.length === 0) {
+    return {
+      exact: new Map<string, { impactFactor: number | null; quartile: string | null; year: number }>(),
+      byNormalizedName: new Map<string, Array<{ impactFactor: number | null; quartile: string | null; year: number }>>(),
+    };
   }
 
   const metrics = await prisma.journalMetric.findMany({
-    where: {
-      OR: uniquePairs.map(pair => ({
-        journalName: pair.journalName,
-        year: pair.year,
-      })),
-    },
     select: {
       journalName: true,
       year: true,
@@ -78,25 +106,70 @@ async function fetchJournalMetricMap(
     },
   });
 
-  return new Map(
-    metrics.map(metric => [
-      getImpactMetricKey(metric.journalName, metric.year) as string,
-      { impactFactor: metric.impactFactor, quartile: metric.quartile },
-    ]),
-  );
+  const exact = new Map<string, { impactFactor: number | null; quartile: string | null; year: number }>();
+  const byNormalizedName = new Map<string, Array<{ impactFactor: number | null; quartile: string | null; year: number }>>();
+
+  for (const metric of metrics) {
+    const record = {
+      impactFactor: metric.impactFactor,
+      quartile: metric.quartile,
+      year: metric.year,
+    };
+    exact.set(getImpactMetricKey(metric.journalName, metric.year) as string, record);
+
+    const normalizedName = normalizeJournalName(metric.journalName);
+    if (!normalizedName) continue;
+
+    const existing = byNormalizedName.get(normalizedName) || [];
+    existing.push(record);
+    byNormalizedName.set(normalizedName, existing);
+  }
+
+  for (const entries of byNormalizedName.values()) {
+    entries.sort((left, right) => left.year - right.year);
+  }
+
+  return { exact, byNormalizedName };
+}
+
+function resolvePublicationJournalMetric(
+  publication: { journalName: string | null; publicationYear: number | null },
+  metricLookup: JournalMetricLookup,
+) {
+  const key = getImpactMetricKey(publication.journalName, publication.publicationYear);
+  if (key) {
+    const exactMetric = metricLookup.exact.get(key);
+    if (exactMetric) return exactMetric;
+  }
+
+  const normalizedJournalName = normalizeJournalName(publication.journalName);
+  if (!normalizedJournalName) return null;
+
+  const candidates = metricLookup.byNormalizedName.get(normalizedJournalName) || [];
+  if (candidates.length === 0) return null;
+
+  const targetYear = getImpactMetricYear(publication.publicationYear);
+  const sameYearMetric = candidates.find(candidate => candidate.year === targetYear);
+  if (sameYearMetric) return sameYearMetric;
+
+  return [...candidates].sort((left, right) => {
+    const leftDistance = Math.abs(left.year - targetYear);
+    const rightDistance = Math.abs(right.year - targetYear);
+    if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+    return right.year - left.year;
+  })[0] || null;
 }
 
 function getPublicationImpactFactor(
   publication: { journalName: string | null; publicationYear: number | null },
-  metricMap: Map<string, { impactFactor: number | null }>,
+  metricLookup: JournalMetricLookup,
 ) {
-  const key = getImpactMetricKey(publication.journalName, publication.publicationYear);
-  return key ? metricMap.get(key)?.impactFactor ?? null : null;
+  return resolvePublicationJournalMetric(publication, metricLookup)?.impactFactor ?? null;
 }
 
 function mapPublicationSummary(
   publication: PublicationWithRelations,
-  metricMap: Map<string, { impactFactor: number | null }>,
+  metricLookup: JournalMetricLookup,
 ): PublicationSummary {
   return {
     id: publication.id,
@@ -106,7 +179,7 @@ function mapPublicationSummary(
     publicationYear: publication.publicationYear,
     journalName: publication.journalName,
     latestCitations: publication.citations[0]?.citationCount ?? 0,
-    impactFactor: getPublicationImpactFactor(publication, metricMap),
+    impactFactor: getPublicationImpactFactor(publication, metricLookup),
     verifiedStatus: publication.verifiedStatus,
     sourcePrimary: publication.sourcePrimary,
     authors: publication.authors.map(author => author.authorName),
@@ -192,9 +265,9 @@ export async function getPublications(
 
   if (filters.minImpactFactor !== undefined) {
     const allPublications = await fetchPublications(where);
-    const metricMap = await fetchJournalMetricMap(allPublications);
+    const metricLookup = await fetchJournalMetricLookup(allPublications);
     const filtered = allPublications.filter(publication => {
-      const impactFactor = getPublicationImpactFactor(publication, metricMap);
+      const impactFactor = getPublicationImpactFactor(publication, metricLookup);
       return impactFactor !== null && impactFactor >= filters.minImpactFactor!;
     });
 
@@ -202,7 +275,7 @@ export async function getPublications(
     publications = filtered.slice((page - 1) * pageSize, page * pageSize);
 
     return {
-      data: publications.map(publication => mapPublicationSummary(publication, metricMap)),
+      data: publications.map(publication => mapPublicationSummary(publication, metricLookup)),
       total,
       page,
       pageSize,
@@ -218,10 +291,10 @@ export async function getPublications(
   total = count;
   publications = pagedPublications;
 
-  const metricMap = await fetchJournalMetricMap(publications);
+  const metricLookup = await fetchJournalMetricLookup(publications);
 
   return {
-    data: publications.map(publication => mapPublicationSummary(publication, metricMap)),
+    data: publications.map(publication => mapPublicationSummary(publication, metricLookup)),
     total,
     page,
     pageSize,
@@ -252,14 +325,13 @@ export async function getPublicationById(id: string) {
 
   if (!pub) return null;
 
-  const journalMetric = pub.journalName
-    ? await prisma.journalMetric.findFirst({
-        where: {
-          journalName: pub.journalName,
-          year: getImpactMetricYear(pub.publicationYear),
-        },
-      })
-    : null;
+  const metricLookup = await fetchJournalMetricLookup([
+    {
+      journalName: pub.journalName,
+      publicationYear: pub.publicationYear,
+    },
+  ]);
+  const journalMetric = resolvePublicationJournalMetric(pub, metricLookup);
 
   const citationHistory = pub.citations.map(citation => ({
     date: citation.capturedAt.toISOString().split('T')[0],
@@ -280,6 +352,7 @@ export async function getPublicationById(id: string) {
 
 export async function getAnalyticsData(filters: FilterState = {}) {
   const researcherWhere = filters.department ? { department: filters.department } : {};
+  const reportingEndYear = new Date().getFullYear();
 
   const departments = (await getAllDepartments(false))
     .filter(department => (filters.department ? department.code === filters.department : true));
@@ -324,12 +397,14 @@ export async function getAnalyticsData(filters: FilterState = {}) {
   }
 
   const uniquePublications = Array.from(publicationEntries.values()).map(entry => entry.publication);
-  const metricMap = await fetchJournalMetricMap(uniquePublications);
+  const metricLookup = await fetchJournalMetricLookup(uniquePublications);
 
   const publicationsByYear: Record<number, Record<string, number>> = {};
   const citationsByYear: Record<number, Record<string, number>> = {};
+  const cumulativeCitationsByYear: Record<number, Record<string, number>> = {};
   const specialtyCounts: Record<string, number> = {};
   const specialtyCitationsByYear: Record<number, Record<string, number>> = {};
+  const specialtyCumulativeCitationsByYear: Record<number, Record<string, number>> = {};
   const specialtyCitationTotals: Record<string, number> = {};
 
   for (const { publication, departments } of publicationEntries.values()) {
@@ -339,12 +414,21 @@ export async function getAnalyticsData(filters: FilterState = {}) {
       publicationsByYear[publicationYear][department] = (publicationsByYear[publicationYear][department] || 0) + 1;
     }
 
-    const citationGrowthByYear = buildObservedCitationGrowthByYear(publication.citations);
+    const citationGrowthByYear = buildObservedCitationGrowthByYear(publication.citations, reportingEndYear);
+    const cumulativeCitationByYear = buildCumulativeCitationCountByYear(publication.citations, reportingEndYear);
     for (const [yearString, growth] of Object.entries(citationGrowthByYear)) {
       const year = Number(yearString);
       if (!citationsByYear[year]) citationsByYear[year] = {};
       for (const department of departments) {
         citationsByYear[year][department] = (citationsByYear[year][department] || 0) + growth;
+      }
+    }
+
+    for (const [yearString, total] of Object.entries(cumulativeCitationByYear)) {
+      const year = Number(yearString);
+      if (!cumulativeCitationsByYear[year]) cumulativeCitationsByYear[year] = {};
+      for (const department of departments) {
+        cumulativeCitationsByYear[year][department] = (cumulativeCitationsByYear[year][department] || 0) + total;
       }
     }
 
@@ -363,6 +447,17 @@ export async function getAnalyticsData(filters: FilterState = {}) {
         specialtyCitationTotals[specialtyName] = (specialtyCitationTotals[specialtyName] || 0) + growth;
       }
     }
+
+    for (const [yearString, total] of Object.entries(cumulativeCitationByYear)) {
+      const year = Number(yearString);
+      if (!specialtyCumulativeCitationsByYear[year]) specialtyCumulativeCitationsByYear[year] = {};
+
+      for (const specialty of publication.specialties) {
+        const specialtyName = specialty.specialty.name;
+        specialtyCumulativeCitationsByYear[year][specialtyName] =
+          (specialtyCumulativeCitationsByYear[year][specialtyName] || 0) + total;
+      }
+    }
   }
 
   const topSpecialtiesByCitations = Object.entries(specialtyCitationTotals)
@@ -378,7 +473,7 @@ export async function getAnalyticsData(filters: FilterState = {}) {
   ];
 
   for (const publication of uniquePublications) {
-    const impactFactor = getPublicationImpactFactor(publication, metricMap);
+    const impactFactor = getPublicationImpactFactor(publication, metricLookup);
     if (impactFactor === null) continue;
     if (impactFactor < 2) impactFactorDistribution[0].count += 1;
     else if (impactFactor < 5) impactFactorDistribution[1].count += 1;
@@ -394,8 +489,25 @@ export async function getAnalyticsData(filters: FilterState = {}) {
         : 0,
     );
     const impactFactors = researcher.matches
-      .map(match => getPublicationImpactFactor(match.publication, metricMap))
+      .map(match => getPublicationImpactFactor(match.publication, metricLookup))
       .filter((value): value is number => value !== null);
+    const citationByYear: Record<number, number> = {};
+    const cumulativeCitationByYear: Record<number, number> = {};
+
+    for (const match of researcher.matches) {
+      const growthByYear = buildObservedCitationGrowthByYear(match.publication.citations, reportingEndYear);
+      const cumulativeByYear = buildCumulativeCitationCountByYear(match.publication.citations, reportingEndYear);
+
+      for (const [yearString, growth] of Object.entries(growthByYear)) {
+        const year = Number(yearString);
+        citationByYear[year] = (citationByYear[year] || 0) + growth;
+      }
+
+      for (const [yearString, total] of Object.entries(cumulativeByYear)) {
+        const year = Number(yearString);
+        cumulativeCitationByYear[year] = (cumulativeCitationByYear[year] || 0) + total;
+      }
+    }
 
     return {
       id: researcher.id,
@@ -408,12 +520,16 @@ export async function getAnalyticsData(filters: FilterState = {}) {
       avgImpactFactor: impactFactors.length > 0
         ? Number((impactFactors.reduce((sum, value) => sum + value, 0) / impactFactors.length).toFixed(2))
         : null,
+      citationByYear,
+      cumulativeCitationByYear,
     };
   }).sort((a, b) => b.hIndex - a.hIndex);
 
   const years = Array.from(new Set([
     ...Object.keys(publicationsByYear).map(Number),
     ...Object.keys(citationsByYear).map(Number),
+    ...Object.keys(cumulativeCitationsByYear).map(Number),
+    reportingEndYear,
   ])).sort((a, b) => a - b);
 
   const departmentKeys = departments.map(department => ({
@@ -444,6 +560,13 @@ export async function getAnalyticsData(filters: FilterState = {}) {
         return acc;
       }, {}),
     })),
+    cumulativeCitationsByYear: years.map(year => ({
+      year,
+      ...departmentKeys.reduce<Record<string, number>>((acc, department) => {
+        acc[department.key] = cumulativeCitationsByYear[year]?.[department.key] ?? 0;
+        return acc;
+      }, {}),
+    })),
     departmentKeys,
     departmentPublicationTotals,
     specialtyDistribution: Object.entries(specialtyCounts)
@@ -456,11 +579,19 @@ export async function getAnalyticsData(filters: FilterState = {}) {
         return acc;
       }, {}),
     })),
+    specialtyCumulativeCitationTrends: years.map(year => ({
+      year,
+      ...topSpecialtiesByCitations.reduce<Record<string, number>>((acc, specialty) => {
+        acc[specialty] = specialtyCumulativeCitationsByYear[year]?.[specialty] ?? 0;
+        return acc;
+      }, {}),
+    })),
     specialtyCitationTrendKeys: topSpecialtiesByCitations.map(specialty => ({
       key: specialty,
       name: specialty,
     })),
     impactFactorDistribution,
     researcherStats,
+    researcherTrendYears: years,
   };
 }

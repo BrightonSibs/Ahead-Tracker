@@ -45,7 +45,7 @@ export default function ResearcherProfilePage() {
     let cancelled = false;
     setLoading(true);
 
-    fetchJsonCached<any>(`/api/researchers/${id}?sluOnly=${sluOnly}`, { force: true })
+    fetchJsonCached<any>(`/api/researchers/${id}?sluOnly=${sluOnly}`)
       .then(data => {
         if (!cancelled) {
           setResearcher(data);
@@ -279,18 +279,34 @@ export default function ResearcherProfilePage() {
               { label: 'i10-index', value: researcher.i10Index ?? 0, color: 'text-teal-700' },
             ]} />
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Citation Growth Trend</CardTitle>
-                <span className="text-xs text-gray-500">
-                  {sluOnly ? 'SLU tenure only' : 'All time'} from stored snapshots
-                </span>
-              </CardHeader>
-              <CitationTrendChart
-                data={researcher.citationByYear || []}
-                keys={[{ key: 'citations', name: 'Observed growth', color: '#1a6fb5' }]}
-              />
-            </Card>
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Citation Growth Trend</CardTitle>
+                  <span className="text-xs text-gray-500">
+                    {sluOnly ? 'SLU tenure only' : 'All time'} from stored snapshots
+                  </span>
+                </CardHeader>
+                <CitationTrendChart
+                  data={researcher.citationByYear || []}
+                  keys={[{ key: 'citations', name: 'Observed growth', color: '#1a6fb5' }]}
+                />
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Cumulative Citations</CardTitle>
+                  <span className="text-xs text-gray-500">
+                    Latest observed totals carried forward by year
+                  </span>
+                </CardHeader>
+                <CitationTrendChart
+                  data={researcher.cumulativeCitationByYear || []}
+                  keys={[{ key: 'citations', name: 'Cumulative citations', color: '#0f766e' }]}
+                  cumulative
+                />
+              </Card>
+            </div>
 
             <Card>
               <CardHeader>
@@ -416,6 +432,26 @@ export default function ResearcherProfilePage() {
                 <p className="mt-1 text-xs text-gray-400">
                   {collaborator.sharedPublications} shared publication{collaborator.sharedPublications === 1 ? '' : 's'}
                 </p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
+                    <p className="uppercase tracking-wide text-gray-400">Shared Citations</p>
+                    <p className="mt-1 font-semibold text-gray-800">{(collaborator.sharedCitations ?? 0).toLocaleString()}</p>
+                  </div>
+                  <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
+                    <p className="uppercase tracking-wide text-gray-400">Latest Shared Year</p>
+                    <p className="mt-1 font-semibold text-gray-800">{collaborator.latestSharedYear ?? '-'}</p>
+                  </div>
+                </div>
+                {collaborator.samplePublicationTitles?.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">Sample Shared Work</p>
+                    <div className="mt-1 space-y-1">
+                      {collaborator.samplePublicationTitles.map((title: string) => (
+                        <p key={title} className="line-clamp-2 text-xs text-gray-600">{title}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Link href={`/researchers/${collaborator.id}`} className="mt-3 inline-block">
                   <Button variant="ghost" size="xs">View Profile</Button>
                 </Link>

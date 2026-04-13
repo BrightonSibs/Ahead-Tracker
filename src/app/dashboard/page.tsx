@@ -10,11 +10,13 @@ import { departmentDotColor, departmentColor, formatDate, sourceLabel } from '@/
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [growthChartData, setGrowthChartData] = useState<any[]>([]);
+  const [cumulativeChartData, setCumulativeChartData] = useState<any[]>([]);
   const [departmentKeys, setDepartmentKeys] = useState<any[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(true);
   const [sluOnly, setSluOnly] = useState(false);
+  const [citationView, setCitationView] = useState<'growth' | 'cumulative'>('growth');
 
   useEffect(() => {
     let cancelled = false;
@@ -36,12 +38,14 @@ export default function DashboardPage() {
     fetchJsonCached<any>(`/api/analytics?type=full&sluOnly=${sluOnly}`)
       .then(fullData => {
         if (cancelled) return;
-        setChartData(fullData?.citationsByYear || []);
+        setGrowthChartData(fullData?.citationsByYear || []);
+        setCumulativeChartData(fullData?.cumulativeCitationsByYear || []);
         setDepartmentKeys(fullData?.departmentKeys || []);
       })
       .catch(() => {
         if (cancelled) return;
-        setChartData([]);
+        setGrowthChartData([]);
+        setCumulativeChartData([]);
         setDepartmentKeys([]);
       })
       .finally(() => {
@@ -52,6 +56,8 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [sluOnly]);
+
+  const activeChartData = citationView === 'cumulative' ? cumulativeChartData : growthChartData;
 
   return (
     <PageLayout>
@@ -134,10 +140,30 @@ export default function DashboardPage() {
             <Card className="lg:col-span-2">
               <CardHeader>
                 <div>
-                  <CardTitle>Department Citation Trends</CardTitle>
+                  <CardTitle>
+                    {citationView === 'cumulative' ? 'Department Cumulative Citations' : 'Department Citation Trends'}
+                  </CardTitle>
                   <p className="mt-0.5 text-xs text-gray-500">
-                    Observed citation growth from stored snapshots {sluOnly ? '(SLU tenure only)' : '(all time)'}
+                    {citationView === 'cumulative'
+                      ? `Latest observed citation totals carried forward by year ${sluOnly ? '(SLU tenure only)' : '(all time)'}`
+                      : `Observed citation growth from stored snapshots ${sluOnly ? '(SLU tenure only)' : '(all time)'}`}
                   </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant={citationView === 'growth' ? 'primary' : 'ghost'}
+                    size="xs"
+                    onClick={() => setCitationView('growth')}
+                  >
+                    Growth
+                  </Button>
+                  <Button
+                    variant={citationView === 'cumulative' ? 'primary' : 'ghost'}
+                    size="xs"
+                    onClick={() => setCitationView('cumulative')}
+                  >
+                    Cumulative
+                  </Button>
                 </div>
               </CardHeader>
               {detailLoading ? (
@@ -145,7 +171,7 @@ export default function DashboardPage() {
                   <Skeleton className="h-64 w-full" />
                 </div>
               ) : (
-                <CitationTrendChart data={chartData} keys={departmentKeys} />
+                <CitationTrendChart data={activeChartData} keys={departmentKeys} cumulative={citationView === 'cumulative'} />
               )}
             </Card>
 

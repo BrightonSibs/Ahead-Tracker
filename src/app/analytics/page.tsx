@@ -223,25 +223,53 @@ export default function AnalyticsPage() {
 
             {activeTab === 'citations' && (
               <div className="space-y-5">
-                <Card>
-                  <CardHeader>
-                    <div>
-                      <CardTitle>Observed Citation Growth by Department</CardTitle>
-                      <p className="mt-0.5 text-xs text-gray-500">Year-over-year growth inferred from stored citation snapshots</p>
-                    </div>
-                  </CardHeader>
-                  <CitationTrendChart data={data?.citationsByYear || []} keys={data?.departmentKeys || []} />
-                </Card>
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <Card>
+                    <CardHeader>
+                      <div>
+                        <CardTitle>Observed Citation Growth by Department</CardTitle>
+                        <p className="mt-0.5 text-xs text-gray-500">Year-over-year growth inferred from stored citation snapshots</p>
+                      </div>
+                    </CardHeader>
+                    <CitationTrendChart data={data?.citationsByYear || []} keys={data?.departmentKeys || []} />
+                  </Card>
 
-                <Card>
-                  <CardHeader>
-                    <div>
-                      <CardTitle>Per-Researcher Citation Growth</CardTitle>
-                      <p className="mt-0.5 text-xs text-gray-500">Top 6 researchers by total citations, using observed growth only</p>
-                    </div>
-                  </CardHeader>
-                  <ResearcherCitationChart researcherStats={data?.researcherStats?.slice(0, 6) || []} />
-                </Card>
+                  <Card>
+                    <CardHeader>
+                      <div>
+                        <CardTitle>Cumulative Citations by Department</CardTitle>
+                        <p className="mt-0.5 text-xs text-gray-500">Latest observed citation totals carried forward across years</p>
+                      </div>
+                    </CardHeader>
+                    <CitationTrendChart
+                      data={data?.cumulativeCitationsByYear || []}
+                      keys={data?.departmentKeys || []}
+                      cumulative
+                    />
+                  </Card>
+                </div>
+
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <Card>
+                    <CardHeader>
+                      <div>
+                        <CardTitle>Per-Researcher Citation Growth</CardTitle>
+                        <p className="mt-0.5 text-xs text-gray-500">Top 6 researchers by total citations, using observed growth only</p>
+                      </div>
+                    </CardHeader>
+                    <ResearcherCitationChart researcherStats={data?.researcherStats?.slice(0, 6) || []} mode="growth" />
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <div>
+                        <CardTitle>Per-Researcher Cumulative Citations</CardTitle>
+                        <p className="mt-0.5 text-xs text-gray-500">Latest observed citation totals carried forward across years</p>
+                      </div>
+                    </CardHeader>
+                    <ResearcherCitationChart researcherStats={data?.researcherStats?.slice(0, 6) || []} mode="cumulative" />
+                  </Card>
+                </div>
               </div>
             )}
 
@@ -351,12 +379,13 @@ export default function AnalyticsPage() {
                   </Card>
                 </div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Specialty Citation Trends</CardTitle>
-                    <p className="text-xs text-gray-500">Observed yearly citation growth for the most-cited specialties</p>
-                  </CardHeader>
-                  <CitationTrendChart
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Specialty Citation Trends</CardTitle>
+                      <p className="text-xs text-gray-500">Observed yearly citation growth for the most-cited specialties</p>
+                    </CardHeader>
+                    <CitationTrendChart
                       data={data?.specialtyCitationTrends || []}
                       keys={(data?.specialtyCitationTrendKeys || []).map((item: any, index: number) => ({
                         key: item.key,
@@ -364,7 +393,24 @@ export default function AnalyticsPage() {
                         color: ['#003DA5', '#4B5563', '#9CA3AF', '#1F2937', '#6B7280'][index % 5],
                       }))}
                     />
-                </Card>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Specialty Cumulative Citations</CardTitle>
+                      <p className="text-xs text-gray-500">Latest observed citation totals carried forward across years</p>
+                    </CardHeader>
+                    <CitationTrendChart
+                      data={data?.specialtyCumulativeCitationTrends || []}
+                      keys={(data?.specialtyCitationTrendKeys || []).map((item: any, index: number) => ({
+                        key: item.key,
+                        name: item.name,
+                        color: ['#003DA5', '#4B5563', '#9CA3AF', '#1F2937', '#6B7280'][index % 5],
+                      }))}
+                      cumulative
+                    />
+                  </Card>
+                </div>
               </div>
             )}
 
@@ -414,41 +460,30 @@ export default function AnalyticsPage() {
   );
 }
 
-function ResearcherCitationChart({ researcherStats }: { researcherStats: any[] }) {
-  const [chartData, setChartData] = useState<any[]>([]);
+function ResearcherCitationChart({
+  researcherStats,
+  mode,
+}: {
+  researcherStats: any[];
+  mode: 'growth' | 'cumulative';
+}) {
   const colors = ['#003DA5', '#4B5563', '#6B7280', '#9CA3AF', '#1F2937', '#D1D5DB'];
+  const chartData = Object.entries(
+    researcherStats.slice(0, 6).reduce<Record<number, Record<string, number>>>((yearMap, researcher, index) => {
+      const series = mode === 'cumulative' ? researcher?.cumulativeCitationByYear : researcher?.citationByYear;
+      if (!series) return yearMap;
 
-  useEffect(() => {
-    if (!researcherStats.length) return;
+      for (const [yearString, citations] of Object.entries(series as Record<number, number>)) {
+        const year = Number(yearString);
+        if (!yearMap[year]) yearMap[year] = {};
+        yearMap[year][`r${index}`] = Number(citations) || 0;
+      }
 
-    let cancelled = false;
-
-    Promise.all(researcherStats.slice(0, 6).map(researcher => fetchJsonCached<any>(`/api/researchers/${researcher.id}`).catch(() => null)))
-      .then(details => {
-        if (cancelled) return;
-
-        const yearMap: Record<number, Record<string, number>> = {};
-
-        details.forEach((detail, index) => {
-          if (!detail?.citationByYear) return;
-
-          for (const { year, citations } of detail.citationByYear) {
-            if (!yearMap[year]) yearMap[year] = {};
-            yearMap[year][`r${index}`] = citations;
-          }
-        });
-
-        setChartData(
-          Object.entries(yearMap)
-            .sort(([a], [b]) => Number(a) - Number(b))
-            .map(([year, values]) => ({ year: Number(year), ...values })),
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [researcherStats]);
+      return yearMap;
+    }, {}),
+  )
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([year, values]) => ({ year: Number(year), ...values }));
 
   const keys = researcherStats.slice(0, 6).map((researcher, index) => ({
     key: `r${index}`,
@@ -456,5 +491,5 @@ function ResearcherCitationChart({ researcherStats }: { researcherStats: any[] }
     color: colors[index],
   }));
 
-  return <CitationTrendChart data={chartData} keys={keys} />;
+  return <CitationTrendChart data={chartData} keys={keys} cumulative={mode === 'cumulative'} />;
 }

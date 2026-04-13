@@ -42,6 +42,8 @@ function PublicationsPageContent() {
   const [researchers, setResearchers] = useState<{ id: string; canonicalName: string; department: string }[]>([]);
   const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const searchParamsString = searchParams.toString();
+  const keywordParam = searchParams.get('keyword') || '';
+  const [keywordDraft, setKeywordDraft] = useState(keywordParam);
   const page = Number(searchParams.get('page') || '1');
 
   const setParam = useCallback((updates: Record<string, string | null>) => {
@@ -64,6 +66,20 @@ function PublicationsPageContent() {
   }, [router, pathname, searchParams]);
 
   const get = (key: string) => searchParams.get(key) || '';
+
+  useEffect(() => {
+    setKeywordDraft(keywordParam);
+  }, [keywordParam]);
+
+  useEffect(() => {
+    if (keywordDraft === keywordParam) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setParam({ keyword: keywordDraft || null });
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [keywordDraft, keywordParam, setParam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,7 +160,7 @@ function PublicationsPageContent() {
             <a href={`/api/export?type=publications&${searchParamsString}`}>
               <Button variant="outline" size="sm">Export CSV</Button>
             </a>
-            <Link href="/admin">
+            <Link href="/admin/publications">
               <Button variant="primary" size="sm">+ Add Publication</Button>
             </Link>
           </TopBarActions>
@@ -156,8 +172,9 @@ function PublicationsPageContent() {
             <div className="relative w-full sm:min-w-[220px] sm:max-w-xs sm:flex-1">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400">/</span>
               <input
-                value={get('keyword')}
-                onChange={e => setParam({ keyword: e.target.value || null })}
+                value={keywordDraft}
+                onChange={e => setKeywordDraft(e.target.value)}
+                onBlur={() => setParam({ keyword: keywordDraft || null })}
                 placeholder="Search title, abstract, journal..."
                 className="w-full rounded-md border border-gray-300 bg-white py-2 pl-8 pr-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               />

@@ -20,7 +20,9 @@ const NAV = [
 const ADMIN_NAV = [
   { href: '/admin', label: 'Overview', icon: 'O' },
   { href: '/admin/departments', label: 'Departments', icon: 'T' },
+  { href: '/admin/publications', label: 'Publications', icon: 'P' },
   { href: '/admin/researchers', label: 'Manage Roster', icon: 'M' },
+  { href: '/admin/data-quality', label: 'Data Quality', icon: 'Q' },
   { href: '/admin/sources', label: 'Data Sources', icon: 'D' },
   { href: '/admin/sync', label: 'Sync Jobs', icon: 'S' },
   { href: '/admin/journals', label: 'Journal IF', icon: 'J' },
@@ -35,7 +37,9 @@ const NAV_DATA_PREFETCH: Record<string, string[]> = {
   '/reports': ['/api/researchers'],
   '/admin': ['/api/analytics?type=dashboard', '/api/admin/sync'],
   '/admin/departments': ['/api/departments'],
+  '/admin/publications': ['/api/researchers', '/api/publications?source=MANUAL&pageSize=10'],
   '/admin/researchers': ['/api/researchers'],
+  '/admin/data-quality': ['/api/admin/data-quality'],
   '/admin/sync': ['/api/admin/sync', '/api/admin/sync/config'],
   '/admin/journals': ['/api/journals'],
 };

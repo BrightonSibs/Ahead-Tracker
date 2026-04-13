@@ -32,7 +32,7 @@ export function CitationTrendChart({ data, keys, cumulative = false }: {
           <Area key={k.key} type="monotone" dataKey={k.key} name={k.name}
             stroke={k.color || INSTITUTIONAL_COLORS[i % INSTITUTIONAL_COLORS.length]}
             fill={k.color || INSTITUTIONAL_COLORS[i % INSTITUTIONAL_COLORS.length]}
-            fillOpacity={0.06} strokeWidth={2} dot={false} activeDot={{ r: 3 }}
+            fillOpacity={cumulative ? 0.12 : 0.06} strokeWidth={2} dot={false} activeDot={{ r: 3 }}
           />
         ))}
       </AreaChart>

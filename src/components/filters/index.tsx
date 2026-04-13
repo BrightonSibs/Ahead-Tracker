@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { startTransition, useCallback } from 'react';
+import { startTransition, useCallback, useEffect, useState } from 'react';
 import { Toggle } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +48,47 @@ interface FilterBarProps {
   className?: string;
 }
 
+function DebouncedTextFilterInput({
+  value,
+  placeholder,
+  className,
+  onCommit,
+}: {
+  value: string;
+  placeholder: string;
+  className?: string;
+  onCommit: (value: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (draft === value) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      onCommit(draft || null);
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [draft, onCommit, value]);
+
+  return (
+    <div className={cn('relative', className || 'w-64')}>
+      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400">/</span>
+      <input
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => onCommit(draft || null)}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-gray-300 bg-white py-2 pl-8 pr-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+      />
+    </div>
+  );
+}
+
 export function FilterBar({ filters, className }: FilterBarProps) {
   const { get, set, reset } = useFilters();
   const hasActive = filters.some(f => !!get(f.key));
@@ -57,15 +98,13 @@ export function FilterBar({ filters, className }: FilterBarProps) {
       {filters.map(f => {
         if (f.type === 'search') {
           return (
-            <div key={f.key} className={cn('relative', f.className || 'w-64')}>
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">/</span>
-              <input
-                value={get(f.key)}
-                onChange={e => set({ [f.key]: e.target.value || null })}
-                placeholder={f.placeholder}
-                className="w-full rounded-md border border-gray-300 bg-white py-2 pl-8 pr-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
+            <DebouncedTextFilterInput
+              key={f.key}
+              value={get(f.key)}
+              onCommit={value => set({ [f.key]: value })}
+              placeholder={f.placeholder}
+              className={f.className}
+            />
           );
         }
 

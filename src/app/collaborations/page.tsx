@@ -50,6 +50,7 @@ export default function CollaborationsPage() {
   const [topPairs, setTopPairs] = useState<any[]>([]);
   const [topCollaborators, setTopCollaborators] = useState<any[]>([]);
   const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
+  const [networkData, setNetworkData] = useState<{ nodes: any[]; edges: Edge[] }>({ nodes: [], edges: [] });
 
   const getDepartmentCanvasColor = useCallback((department: string) => {
     return departmentColorsRef.current[department] || departmentHexColor(department);
@@ -159,11 +160,8 @@ export default function CollaborationsPage() {
     let cancelled = false;
     setLoading(true);
 
-    const params = new URLSearchParams();
-    if (deptFilter) params.set('department', deptFilter);
-
     Promise.allSettled([
-      fetchJsonCached<any>(`/api/collaborations?${params}`),
+      fetchJsonCached<any>('/api/collaborations'),
       fetchJsonCached<DepartmentSummary[]>('/api/departments'),
     ])
       .then(([networkResult, departmentResult]) => {
@@ -189,7 +187,7 @@ export default function CollaborationsPage() {
           return acc;
         }, {});
         setDepartments(activeDepartments);
-        buildNetwork(network);
+        setNetworkData(network);
         setLoading(false);
       })
       .catch(() => {
@@ -199,7 +197,12 @@ export default function CollaborationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [deptFilter, minCoauth, buildNetwork]);
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    buildNetwork(networkData);
+  }, [buildNetwork, loading, networkData]);
 
   const startAnimation = useCallback(() => {
     cancelAnimationFrame(animRef.current);

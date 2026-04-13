@@ -51,6 +51,14 @@ export async function POST(req: NextRequest) {
   const { prisma } = await import('@/lib/prisma');
 
   try {
+    let parsedCitationCount: number | null = null;
+    if (body.citationCount !== undefined && body.citationCount !== null && body.citationCount !== '') {
+      parsedCitationCount = Number(body.citationCount);
+      if (Number.isNaN(parsedCitationCount) || parsedCitationCount < 0) {
+        return NextResponse.json({ error: 'Citation count must be a non-negative number' }, { status: 400 });
+      }
+    }
+
     const pub = await prisma.publication.create({
       data: {
         title: body.title,
@@ -64,6 +72,8 @@ export async function POST(req: NextRequest) {
         verifiedStatus: 'UNVERIFIED',
       },
     });
+
+    const actorId = (session.user as any)?.id;
 
     // Add authors
     if (body.authors?.length) {
@@ -79,16 +89,59 @@ export async function POST(req: NextRequest) {
 
     // Add researcher matches
     if (body.researcherIds?.length) {
+      const researchers = await prisma.researcher.findMany({
+        where: { id: { in: body.researcherIds } },
+        select: {
+          id: true,
+          sluStartDate: true,
+        },
+      });
+
       await prisma.publicationResearcherMatch.createMany({
-        data: body.researcherIds.map((rid: string) => ({
-          publicationId: pub.id,
-          researcherId: rid,
-          matchType: 'MANUAL_ASSIGNMENT',
-          matchConfidence: 1.0,
-          manuallyConfirmed: true,
-        })),
+        data: researchers.map(researcher => {
+          const includedInSluOutput =
+            !researcher.sluStartDate || !pub.publicationDate || pub.publicationDate >= researcher.sluStartDate;
+
+          return {
+            publicationId: pub.id,
+            researcherId: researcher.id,
+            matchType: 'MANUAL_ASSIGNMENT',
+            matchConfidence: 1.0,
+            manuallyConfirmed: true,
+            includedInSluOutput,
+            sluTenureNote:
+              includedInSluOutput || !researcher.sluStartDate || !pub.publicationDate
+                ? null
+                : `Published before researcher's SLU start date (${researcher.sluStartDate.toISOString().split('T')[0]})`,
+          };
+        }),
       });
     }
+
+    if (parsedCitationCount !== null) {
+      await prisma.citation.create({
+        data: {
+          publicationId: pub.id,
+          source: body.sourcePrimary || 'MANUAL',
+          citationCount: parsedCitationCount,
+          capturedAt: new Date(),
+        },
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        entityType: 'publication',
+        entityId: pub.id,
+        action: 'CREATE',
+        newData: JSON.stringify({
+          ...body,
+          publicationId: pub.id,
+        }),
+        userId: actorId,
+        publicationId: pub.id,
+      },
+    });
 
     return NextResponse.json(pub, { status: 201 });
   } catch (e: any) {

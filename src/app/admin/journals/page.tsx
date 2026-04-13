@@ -23,6 +23,21 @@ type JournalFormState = {
   source: string;
 };
 
+type MissingCoverageSummary = {
+  totalPublications: number;
+  totalJournalMetrics: number;
+  resolvedByFallbackCount: number;
+  missingJournalNameCount: number;
+  unresolvedPublicationCount: number;
+  unresolvedJournalPairCount: number;
+  unresolved: Array<{
+    journalName: string | null;
+    publicationYear: number | null;
+    publicationCount: number;
+    sampleTitles: string[];
+  }>;
+};
+
 const EMPTY_FORM: JournalFormState = {
   journalName: '',
   issn: '',
@@ -34,9 +49,12 @@ const EMPTY_FORM: JournalFormState = {
 
 export default function AdminJournalsPage() {
   const [journals, setJournals] = useState<JournalMetricRecord[]>([]);
+  const [coverage, setCoverage] = useState<MissingCoverageSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [coverageLoading, setCoverageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [downloadingCoverage, setDownloadingCoverage] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -45,6 +63,7 @@ export default function AdminJournalsPage() {
 
   useEffect(() => {
     loadJournals();
+    loadCoverage();
   }, []);
 
   async function loadJournals() {
@@ -64,6 +83,25 @@ export default function AdminJournalsPage() {
       setMsg({ type: 'error', text: error.message || 'Unable to load journal metrics.' });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadCoverage() {
+    setCoverageLoading(true);
+
+    try {
+      const response = await fetch('/api/journals/coverage', { cache: 'no-store' });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to load journal coverage');
+      }
+
+      setCoverage(data);
+    } catch (error: any) {
+      setMsg(prev => prev || { type: 'error', text: error.message || 'Unable to load journal coverage.' });
+    } finally {
+      setCoverageLoading(false);
     }
   }
 
@@ -122,6 +160,7 @@ export default function AdminJournalsPage() {
         setMsg({ type: 'success', text: 'Journal metric added.' });
       }
 
+      await loadCoverage();
       resetForm();
     } catch (error: any) {
       setMsg({ type: 'error', text: error.message || 'Unable to save journal metric.' });
@@ -149,6 +188,7 @@ export default function AdminJournalsPage() {
       setJournals(prev => prev.filter(item => item.id !== journal.id));
       if (editingId === journal.id) resetForm();
       setMsg({ type: 'success', text: 'Journal metric deleted.' });
+      await loadCoverage();
     } catch (error: any) {
       setMsg({ type: 'error', text: error.message || 'Unable to delete journal metric.' });
     } finally {
@@ -195,6 +235,7 @@ export default function AdminJournalsPage() {
       }
 
       await loadJournals();
+      await loadCoverage();
       setMsg({
         type: 'success',
         text: `${data.created} new and ${data.updated} updated journal metric records imported.`,
@@ -203,6 +244,31 @@ export default function AdminJournalsPage() {
       setMsg({ type: 'error', text: error.message || 'Unable to import journal metrics.' });
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function downloadCoverageCSV() {
+    setDownloadingCoverage(true);
+    setMsg(null);
+
+    try {
+      const response = await fetch('/api/journals/coverage?format=csv', { cache: 'no-store' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'Unable to download missing journal coverage.');
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `missing-journal-metrics-${Date.now()}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setMsg({ type: 'error', text: error.message || 'Unable to download missing journal coverage.' });
+    } finally {
+      setDownloadingCoverage(false);
     }
   }
 
@@ -392,6 +458,69 @@ export default function AdminJournalsPage() {
                 <span className="text-sm text-gray-500">{importing ? 'Importing...' : 'Drop CSV or click to upload'}</span>
                 <input type="file" accept=".csv" className="hidden" onChange={handleCSVUpload} disabled={importing} />
               </label>
+            </Card>
+
+            <Card>
+              <CardHeader className="items-start sm:items-start">
+                <div>
+                  <CardTitle>Coverage Gap Report</CardTitle>
+                  <p className="mt-2 text-xs text-gray-500">
+                    Review the journal and year pairs that still cannot resolve an impact factor after fallback matching.
+                  </p>
+                </div>
+              </CardHeader>
+
+              {coverageLoading ? (
+                <div className="py-4 text-center">
+                  <Spinner size="sm" />
+                </div>
+              ) : coverage ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">Unresolved Publications</p>
+                      <p className="mt-1 font-semibold text-gray-900">{coverage.unresolvedPublicationCount}</p>
+                    </div>
+                    <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">Journal/Year Pairs</p>
+                      <p className="mt-1 font-semibold text-gray-900">{coverage.unresolvedJournalPairCount}</p>
+                    </div>
+                    <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">Recovered by Fallback</p>
+                      <p className="mt-1 font-semibold text-gray-900">{coverage.resolvedByFallbackCount}</p>
+                    </div>
+                    <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">Missing Journal Name</p>
+                      <p className="mt-1 font-semibold text-gray-900">{coverage.missingJournalNameCount}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1" onClick={loadCoverage} disabled={coverageLoading}>
+                      Refresh Report
+                    </Button>
+                    <Button variant="outline" className="flex-1" onClick={downloadCoverageCSV} loading={downloadingCoverage}>
+                      Export CSV
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {coverage.unresolved.length === 0 ? (
+                      <p className="text-sm text-gray-500">All visible publications can currently resolve an impact factor.</p>
+                    ) : coverage.unresolved.slice(0, 6).map(item => (
+                      <div key={`${item.journalName || 'missing'}-${item.publicationYear || 'unknown'}`} className="rounded border border-gray-200 px-3 py-2">
+                        <p className="text-sm font-semibold text-gray-900">{item.journalName || 'Missing journal name'}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Year: {item.publicationYear ?? 'Unknown'} | Publications blocked: {item.publicationCount}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">{item.sampleTitles.join(' | ')}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">Coverage details are unavailable right now.</p>
+              )}
             </Card>
 
             <Card>

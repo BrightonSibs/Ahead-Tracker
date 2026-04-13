@@ -111,44 +111,61 @@ export default function AdminSyncPage() {
     setLoading(false);
   }
 
+  async function runSyncRequest(source: string) {
+    const response = await fetch('/api/admin/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      return {
+        type: 'error' as MessageTone,
+        text: summarizeJobError(source, result.error) || `${sourceLabel(source)} sync failed.`,
+      };
+    }
+
+    if (result.status === 'FAILED') {
+      return {
+        type: 'error' as MessageTone,
+        text: summarizeJobError(source, result.errorMessage) || `${sourceLabel(source)} sync failed.`,
+      };
+    }
+
+    if (result.status === 'PARTIAL') {
+      return {
+        type: 'warning' as MessageTone,
+        text:
+          `${sourceLabel(source)} sync completed with some skipped records: ` +
+          `${result.recordsFound ?? 0} found, ${result.recordsCreated ?? 0} new, ${result.recordsUpdated ?? 0} updated.` +
+          `${result.errorMessage ? ` ${summarizeJobError(source, result.errorMessage)}` : ''}`,
+      };
+    }
+
+    return {
+      type: 'success' as MessageTone,
+      text:
+        `${sourceLabel(source)} sync ${String(result.status || 'completed').toLowerCase()}: ` +
+        `${result.recordsFound ?? 0} found, ${result.recordsCreated ?? 0} new, ${result.recordsUpdated ?? 0} updated.`,
+    };
+  }
+
+  async function refreshAfterSync() {
+    invalidateJsonCache('/api/admin/sync');
+    invalidateJsonCache('/api/analytics');
+    invalidateJsonCache('/api/researchers');
+    invalidateJsonCache('/api/publications');
+    await loadPageData();
+  }
+
   async function triggerSync(source: string) {
     setMessage(null);
     setSyncing(source);
 
     try {
-      const response = await fetch('/api/admin/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source }),
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setMessage({
-          type: 'error',
-          text: summarizeJobError(source, result.error) || `${sourceLabel(source)} sync failed.`,
-        });
-      } else if (result.status === 'FAILED') {
-        setMessage({
-          type: 'error',
-          text: summarizeJobError(source, result.errorMessage) || `${sourceLabel(source)} sync failed.`,
-        });
-      } else if (result.status === 'PARTIAL') {
-        setMessage({
-          type: 'warning',
-          text:
-            `${sourceLabel(source)} sync completed with some skipped records: ` +
-            `${result.recordsFound ?? 0} found, ${result.recordsCreated ?? 0} new, ${result.recordsUpdated ?? 0} updated.` +
-            `${result.errorMessage ? ` ${summarizeJobError(source, result.errorMessage)}` : ''}`,
-        });
-      } else {
-        setMessage({
-          type: 'success',
-          text:
-            `${sourceLabel(source)} sync ${String(result.status || 'completed').toLowerCase()}: ` +
-            `${result.recordsFound ?? 0} found, ${result.recordsCreated ?? 0} new, ${result.recordsUpdated ?? 0} updated.`,
-        });
-      }
+      const outcome = await runSyncRequest(source);
+      setMessage(outcome);
     } catch {
       setMessage({
         type: 'error',
@@ -156,11 +173,45 @@ export default function AdminSyncPage() {
       });
     }
 
-    invalidateJsonCache('/api/admin/sync');
-    invalidateJsonCache('/api/analytics');
-    invalidateJsonCache('/api/researchers');
-    invalidateJsonCache('/api/publications');
-    await loadPageData();
+    await refreshAfterSync();
+    setSyncing(null);
+  }
+
+  async function triggerConfiguredSyncs() {
+    const configuredSources = SOURCES.filter(source => sourceConfig[source]?.configured ?? true);
+    if (configuredSources.length === 0) {
+      setMessage({ type: 'warning', text: 'No configured sources are available to run.' });
+      return;
+    }
+
+    setMessage(null);
+    setSyncing('ALL');
+
+    const outcomes: Array<{ source: string; type: MessageTone; text: string }> = [];
+
+    for (const source of configuredSources) {
+      try {
+        const outcome = await runSyncRequest(source);
+        outcomes.push({ source, ...outcome });
+      } catch {
+        outcomes.push({
+          source,
+          type: 'error',
+          text: `${sourceLabel(source)} sync failed before the server returned a result.`,
+        });
+      }
+    }
+
+    const errorCount = outcomes.filter(outcome => outcome.type === 'error').length;
+    const warningCount = outcomes.filter(outcome => outcome.type === 'warning').length;
+    const summaryType: MessageTone = errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : 'success';
+    const summaryText =
+      `Configured sync run finished for ${configuredSources.length} source${configuredSources.length === 1 ? '' : 's'}: ` +
+      `${outcomes.filter(outcome => outcome.type === 'success').length} successful, ` +
+      `${warningCount} partial, ${errorCount} failed.`;
+
+    setMessage({ type: summaryType, text: summaryText });
+    await refreshAfterSync();
     setSyncing(null);
   }
 
@@ -173,8 +224,22 @@ export default function AdminSyncPage() {
   };
 
   return (
-    <PageLayout>
-      <TopBar title="Sync Jobs" subtitle="Run and review publication ingestion from external sources" />
+      <PageLayout>
+        <TopBar
+          title="Sync Jobs"
+          subtitle="Run and review publication ingestion from external sources"
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={triggerConfiguredSyncs}
+              loading={syncing === 'ALL'}
+              disabled={loading}
+            >
+              Run All Configured
+            </Button>
+          }
+        />
       <PageContent>
         {message && <Alert type={message.type}>{message.text}</Alert>}
 

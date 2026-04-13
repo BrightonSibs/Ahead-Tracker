@@ -1,5 +1,9 @@
 import { prisma } from '@/lib/prisma';
-import { buildObservedCitationGrowthByYear, getLatestCitationCount } from '@/lib/citation-metrics';
+import {
+  buildCumulativeCitationCountByYear,
+  buildObservedCitationGrowthByYear,
+  getLatestCitationCount,
+} from '@/lib/citation-metrics';
 import { calcHIndex, calcI10Index } from '@/lib/utils';
 import type { ResearcherSummary } from '@/types';
 
@@ -172,6 +176,7 @@ export async function getResearchersSummary(filters?: {
 }
 
 export async function getResearcherById(id: string, sluOnly = false) {
+  const reportingEndYear = new Date().getFullYear();
   const researcher = await prisma.researcher.findUnique({
     where: { id },
     include: {
@@ -209,11 +214,18 @@ export async function getResearcherById(id: string, sluOnly = false) {
 
   // Build a conservative year-over-year growth series from stored snapshots.
   const citByYear: Record<number, number> = {};
+  const cumulativeCitByYear: Record<number, number> = {};
   for (const match of researcher.matches) {
-    const growthByYear = buildObservedCitationGrowthByYear(match.publication.citations);
+    const growthByYear = buildObservedCitationGrowthByYear(match.publication.citations, reportingEndYear);
+    const cumulativeByYear = buildCumulativeCitationCountByYear(match.publication.citations, reportingEndYear);
     for (const [year, growth] of Object.entries(growthByYear)) {
       const numericYear = Number(year);
       citByYear[numericYear] = (citByYear[numericYear] || 0) + growth;
+    }
+
+    for (const [year, citations] of Object.entries(cumulativeByYear)) {
+      const numericYear = Number(year);
+      cumulativeCitByYear[numericYear] = (cumulativeCitByYear[numericYear] || 0) + citations;
     }
   }
 
@@ -248,24 +260,64 @@ export async function getResearcherById(id: string, sluOnly = false) {
       })
     : [];
 
-  const collaboratorCounts = new Map<string, { id: string; name: string; department: string; sharedPublications: number }>();
+  const publicationDetailsById = new Map(
+    researcher.matches.map(match => [
+      match.publicationId,
+      {
+        title: match.publication.title,
+        publicationYear: match.publication.publicationYear,
+        latestCitations: getLatestCitationCount(match.publication.citations),
+      },
+    ]),
+  );
+
+  const collaboratorCounts = new Map<string, {
+    id: string;
+    name: string;
+    department: string;
+    sharedPublications: number;
+    sharedCitations: number;
+    latestSharedYear: number | null;
+    samplePublicationTitles: string[];
+  }>();
   for (const match of collaboratorMatches) {
+    const publicationDetails = publicationDetailsById.get(match.publicationId);
     const existing = collaboratorCounts.get(match.researcherId);
     if (existing) {
       existing.sharedPublications += 1;
+      existing.sharedCitations += publicationDetails?.latestCitations ?? 0;
+      existing.latestSharedYear = Math.max(existing.latestSharedYear ?? 0, publicationDetails?.publicationYear ?? 0) || null;
+      if (
+        publicationDetails?.title
+        && existing.samplePublicationTitles.length < 3
+        && !existing.samplePublicationTitles.includes(publicationDetails.title)
+      ) {
+        existing.samplePublicationTitles.push(publicationDetails.title);
+      }
     } else {
       collaboratorCounts.set(match.researcherId, {
         id: match.researcher.id,
         name: match.researcher.canonicalName,
         department: match.researcher.department,
         sharedPublications: 1,
+        sharedCitations: publicationDetails?.latestCitations ?? 0,
+        latestSharedYear: publicationDetails?.publicationYear ?? null,
+        samplePublicationTitles: publicationDetails?.title ? [publicationDetails.title] : [],
       });
     }
   }
 
   const topCollaborators = Array.from(collaboratorCounts.values())
-    .sort((a, b) => b.sharedPublications - a.sharedPublications || a.name.localeCompare(b.name))
+    .sort((a, b) =>
+      b.sharedPublications - a.sharedPublications
+      || b.sharedCitations - a.sharedCitations
+      || a.name.localeCompare(b.name))
     .slice(0, 8);
+
+  const citationYears = Array.from(new Set([
+    ...Object.keys(citByYear).map(Number),
+    ...Object.keys(cumulativeCitByYear).map(Number),
+  ])).sort((a, b) => a - b);
 
   return {
     ...researcher,
@@ -274,9 +326,10 @@ export async function getResearcherById(id: string, sluOnly = false) {
     hIndex,
     i10Index,
     publicationCount: researcher.matches.length,
-    citationByYear: Object.entries(citByYear)
-      .sort(([a], [b]) => Number(a) - Number(b))
-      .map(([year, citations]) => ({ year: Number(year), citations })),
+    citationByYear: citationYears
+      .map(year => ({ year, citations: citByYear[year] ?? 0 })),
+    cumulativeCitationByYear: citationYears
+      .map(year => ({ year, citations: cumulativeCitByYear[year] ?? 0 })),
     topJournals,
     topCollaborators,
     specialties: researcher.specialties.map(s => s.specialty),

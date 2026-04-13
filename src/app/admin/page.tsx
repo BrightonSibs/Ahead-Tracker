@@ -12,6 +12,7 @@ import { sourceLabel, formatDate } from '@/lib/utils';
 export default function AdminPage() {
   const { data: session } = useSession();
   const [stats, setStats] = useState<any>(null);
+  const [quality, setQuality] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -31,10 +32,12 @@ export default function AdminPage() {
     Promise.all([
       fetchJsonCached<any>('/api/analytics?type=dashboard'),
       fetchJsonCached<any[]>('/api/admin/sync'),
+      fetchJsonCached<any>('/api/admin/data-quality'),
     ])
-      .then(([dashboardData, syncData]) => {
+      .then(([dashboardData, syncData, qualityData]) => {
         if (cancelled) return;
         setStats(dashboardData);
+        setQuality(qualityData);
         setAlerts(dashboardData?.alerts || []);
         setJobs(syncData || []);
         setLoading(false);
@@ -108,10 +111,12 @@ export default function AdminPage() {
 
   const adminSections = [
     { href: '/admin/researchers', label: 'Manage Roster', icon: 'R', desc: 'Add, edit, deactivate researchers, and manage aliases.' },
+    { href: '/admin/publications', label: 'Manage Publications', icon: 'P', desc: 'Add manual publications and attach citation snapshots for source gaps.' },
     { href: '/admin/departments', label: 'Departments', icon: 'D', desc: 'Add, edit, and retire departments without code changes.' },
     { href: '/admin/sources', label: 'Data Sources', icon: 'S', desc: 'Configure CrossRef, PubMed, Europe PMC, ORCID, OpenAlex, and Scholar sync settings.' },
     { href: '/admin/sync', label: 'Sync Jobs', icon: 'J', desc: 'Trigger and monitor sync jobs across connected data sources.' },
     { href: '/admin/journals', label: 'Journal Impact Factors', icon: 'I', desc: 'Manage journal impact factor records and import CSV files.' },
+    { href: '/admin/data-quality', label: 'Data Quality', icon: 'Q', desc: 'Review missing metadata, unresolved impact factors, and manual cleanup targets.' },
   ];
 
   const alertTypeIcon: Record<string, string> = {
@@ -278,6 +283,68 @@ export default function AdminPage() {
 
             <Card>
               <CardHeader>
+                <CardTitle>Data Quality Summary</CardTitle>
+                <Link href="/admin/journals">
+                  <Button variant="ghost" size="xs">Journal tools</Button>
+                </Link>
+              </CardHeader>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Missing ORCID', value: quality?.counts?.missingOrcidCount ?? '-', href: '/admin/researchers' },
+                  { label: 'Missing SLU Start', value: quality?.counts?.missingSluStartCount ?? '-', href: '/admin/researchers' },
+                  { label: 'Missing Journal', value: quality?.counts?.missingJournalNameCount ?? '-', href: '/publications' },
+                  { label: 'Missing Abstract', value: quality?.counts?.missingAbstractCount ?? '-', href: '/publications' },
+                  { label: 'Needs Review', value: quality?.counts?.needsReviewCount ?? '-', href: '/publications?verifiedStatus=NEEDS_REVIEW' },
+                  { label: 'Unknown IF', value: quality?.counts?.unresolvedImpactFactorCount ?? '-', href: '/admin/journals' },
+                ].map(item => (
+                  <Link key={item.label} href={item.href} className="rounded-lg bg-gray-50 p-3 transition-colors hover:bg-brand-50">
+                    <div className="font-display text-xl font-bold text-brand-700">{item.value}</div>
+                    <div className="mt-0.5 text-xs text-gray-500">{item.label}</div>
+                  </Link>
+                ))}
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Researchers Missing Metadata</p>
+                  <div className="space-y-2">
+                    {quality?.samples?.researchersMissingMetadata?.length ? quality.samples.researchersMissingMetadata.map((researcher: any) => (
+                      <Link key={researcher.id} href={`/researchers/${researcher.id}`} className="block rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 hover:border-brand-200 hover:bg-brand-50">
+                        <p className="text-sm font-medium text-gray-800">{researcher.canonicalName}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {researcher.department}
+                          {researcher.orcid ? '' : ' | Missing ORCID'}
+                          {researcher.sluStartDate ? '' : ' | Missing SLU start'}
+                        </p>
+                      </Link>
+                    )) : (
+                      <p className="text-sm text-gray-400">No sampled researcher gaps right now.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Publications Needing Attention</p>
+                  <div className="space-y-2">
+                    {quality?.samples?.publicationsMissingMetadata?.length ? quality.samples.publicationsMissingMetadata.map((publication: any) => (
+                      <Link key={publication.id} href={`/publications/${publication.id}`} className="block rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 hover:border-brand-200 hover:bg-brand-50">
+                        <p className="line-clamp-2 text-sm font-medium text-gray-800">{publication.title}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {publication.publicationYear ?? 'Unknown year'}
+                          {publication.journalName ? '' : ' | Missing journal'}
+                          {publication.verifiedStatus === 'NEEDS_REVIEW' ? ' | Needs review' : ''}
+                        </p>
+                      </Link>
+                    )) : (
+                      <p className="text-sm text-gray-400">No sampled publication gaps right now.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader>
                 <CardTitle>System Overview</CardTitle>
               </CardHeader>
               <div className="grid grid-cols-2 gap-3">
@@ -303,7 +370,9 @@ export default function AdminPage() {
                 {[
                   { href: '/api/export?type=researchers', label: 'Export full researcher roster CSV', external: true },
                   { href: '/api/export?type=publications', label: 'Export all publications CSV', external: true },
+                  { href: '/admin/publications', label: 'Add manual publication', external: false },
                   { href: '/admin/researchers', label: 'Add new researcher', external: false },
+                  { href: '/admin/data-quality', label: 'Open data quality review', external: false },
                   { href: '/admin/departments', label: 'Manage departments', external: false },
                   { href: '/publications?verifiedStatus=NEEDS_REVIEW', label: 'Review flagged publications', external: false },
                 ].map(action =>
