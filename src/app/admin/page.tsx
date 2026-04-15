@@ -351,8 +351,8 @@ export default function AdminPage() {
                 {[
                   { label: 'Total Researchers', value: stats?.totalResearchers ?? '-', color: 'text-brand-700' },
                   { label: 'Publications', value: stats?.totalPublications ?? '-', color: 'text-teal-700' },
-                  { label: 'Total Citations', value: (stats?.totalCitations ?? 0).toLocaleString(), color: 'text-green-700' },
-                  { label: 'Avg Cit / Article', value: stats?.avgCitationsPerArticle ?? '-', color: 'text-gray-700' },
+                  { label: 'Captured Citations', value: (stats?.totalCitations ?? 0).toLocaleString(), color: 'text-green-700' },
+                  { label: 'Avg Captured Cit / Snapshotted Article', value: stats?.avgCitationsPerArticle ?? '-', color: 'text-gray-700' },
                 ].map(item => (
                   <div key={item.label} className="rounded-lg bg-gray-50 p-3">
                     <div className={`font-display text-xl font-bold ${item.color}`}>{item.value}</div>

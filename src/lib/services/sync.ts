@@ -12,6 +12,7 @@ type PublicationCandidate = {
   source: AutomaticSyncSource;
   externalId: string | null;
   alternateExternalIds?: string[];
+  profileBacked?: boolean;
   doi: string | null;
   pubmedId: string | null;
   title: string;
@@ -21,6 +22,22 @@ type PublicationCandidate = {
   publicationYear: number | null;
   authorNames: string[];
   citationCount: number | null;
+};
+
+type GoogleScholarAuthorArticle = {
+  title?: string;
+  citation_id?: string;
+  authors?: string;
+  publication?: string;
+  cited_by?: { value?: number; cites_id?: string };
+  year?: string;
+};
+
+type GoogleScholarAuthorResponse = {
+  articles?: GoogleScholarAuthorArticle[];
+  serpapi_pagination?: {
+    next?: string;
+  };
 };
 
 const hostRequestSpacing = new Map<string, number>();
@@ -81,6 +98,123 @@ function normalizeJournalName(value: string | null | undefined) {
   return normalizeWhitespace(value)
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '');
+}
+
+function getJournalSourcePriority(source: string | null | undefined) {
+  const priorities: Record<string, number> = {
+    MANUAL: 100,
+    ORCID: 60,
+    PUBMED: 55,
+    CROSSREF: 50,
+    OPENALEX: 45,
+    EUROPE_PMC: 40,
+    GOOGLE_SCHOLAR: 10,
+    RESEARCHGATE: 5,
+  };
+
+  return priorities[source || ''] || 0;
+}
+
+function looksLikePublisherOrHostSegment(value: string) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) return false;
+
+  if (/\b[a-z0-9-]+\.[a-z]{2,}\b/i.test(normalized)) return true;
+
+  const knownPublishers = new Set([
+    'elsevier',
+    'jstor',
+    'springer',
+    'wiley online library',
+    'sage publications',
+    'taylor & francis',
+    'oxford academic',
+  ]);
+
+  return knownPublishers.has(normalized.toLowerCase());
+}
+
+function sanitizeJournalName(value: string | null | undefined, source?: string | null) {
+  if (!value) return null;
+
+  let sanitized = normalizeWhitespace(value)
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\s*\|\s*.*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!sanitized) return null;
+
+  if (source === 'GOOGLE_SCHOLAR' && sanitized.includes(' - ')) {
+    const segments = sanitized.split(/\s+-\s+/);
+    while (segments.length > 1 && looksLikePublisherOrHostSegment(segments[segments.length - 1] || '')) {
+      segments.pop();
+    }
+    sanitized = segments.join(' - ').trim();
+  }
+
+  sanitized = sanitized.replace(/\s+-\s+[a-z0-9-]+\.[a-z]{2,}.*$/i, '').trim();
+
+  let previousValue = '';
+  while (sanitized && sanitized !== previousValue) {
+    previousValue = sanitized;
+    sanitized = sanitized
+      .replace(/\s+\d+\s*\([^)]*\)\s*,?\s*[^,]+,\s*$/i, '')
+      .replace(/\s+\d+(?:\s*\([^)]*\))+\s*,?\s*$/i, '')
+      .replace(/\s*\(\d+\)\s*$/i, '')
+      .replace(/,\s*[A-Za-z]?[A-Za-z0-9_.-]*\d[A-Za-z0-9_.-]*\s*,?\s*$/i, '')
+      .replace(/\s+\d+\s*,?\s*$/i, '')
+      .replace(/[,:;|\-]+$/g, '')
+      .trim();
+  }
+
+  if (!sanitized) return null;
+  if (sanitized.includes('\u2026') || sanitized.includes('...')) return null;
+  if (/\b[a-z0-9-]+\.[a-z]{2,}\b/i.test(sanitized)) return null;
+  if (!/[A-Za-z]{3}/.test(sanitized)) return null;
+
+  return sanitized;
+}
+
+function journalNameQualityScore(value: string | null | undefined, source?: string | null) {
+  const sanitized = sanitizeJournalName(value, source);
+  if (!sanitized) return Number.NEGATIVE_INFINITY;
+
+  let score = getJournalSourcePriority(source) * 100;
+  score += Math.min(sanitized.length, 80);
+
+  const trimmed = normalizeWhitespace(value || '');
+  if (trimmed === sanitized) score += 15;
+  if (/\bjournal\b/i.test(sanitized)) score += 5;
+
+  return score;
+}
+
+function selectPreferredJournalName(
+  candidates: Array<{ journalName: string | null | undefined; source?: string | null }>,
+) {
+  let bestValue: string | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidate of candidates) {
+    const sanitized = sanitizeJournalName(candidate.journalName, candidate.source);
+    const score = journalNameQualityScore(candidate.journalName, candidate.source);
+    if (!sanitized) continue;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestValue = sanitized;
+    }
+  }
+
+  return bestValue;
+}
+
+function sanitizePublicationCandidate(candidate: PublicationCandidate): PublicationCandidate {
+  return {
+    ...candidate,
+    journalName: sanitizeJournalName(candidate.journalName, candidate.source),
+  };
 }
 
 function normalizeDoi(value: string | null | undefined) {
@@ -182,6 +316,73 @@ function splitAuthorList(rawValue: string | null | undefined) {
   );
 }
 
+function tokenizeName(value: string) {
+  return normalizeName(value).split(' ').filter(Boolean);
+}
+
+function buildNameSignatures(value: string) {
+  const tokens = tokenizeName(value);
+  const signatures = new Set<string>();
+
+  if (tokens.length === 0) {
+    return signatures;
+  }
+
+  signatures.add(`full:${tokens.join(' ')}`);
+
+  if (tokens.length < 2) {
+    return signatures;
+  }
+
+  const orientations = [
+    { given: tokens[0], surname: tokens[tokens.length - 1], middles: tokens.slice(1, -1) },
+    { given: tokens[tokens.length - 1], surname: tokens[0], middles: tokens.slice(1, -1) },
+  ];
+
+  for (const orientation of orientations) {
+    const initials = [orientation.given, ...orientation.middles].map(token => token[0]).join('');
+    signatures.add(`given-surname:${orientation.given}|${orientation.surname}`);
+    signatures.add(`given-initial-surname:${orientation.given[0]}|${orientation.surname}`);
+    signatures.add(`given-surname-initial:${orientation.given}|${orientation.surname[0]}`);
+    signatures.add(`initials-surname:${initials}|${orientation.surname}`);
+  }
+
+  return signatures;
+}
+
+function buildResearcherNameCatalog(researcher: ResearcherWithAliases) {
+  const canonicalExact = new Set<string>();
+  const aliasExact = new Set<string>();
+  const canonicalSignatures = new Set<string>();
+  const aliasSignatures = new Set<string>();
+
+  for (const name of [researcher.canonicalName]) {
+    const normalized = normalizeName(name);
+    if (normalized) canonicalExact.add(normalized);
+    for (const signature of buildNameSignatures(name)) canonicalSignatures.add(signature);
+  }
+
+  for (const alias of researcher.aliases) {
+    const normalized = normalizeName(alias.aliasName);
+    if (normalized) aliasExact.add(normalized);
+    for (const signature of buildNameSignatures(alias.aliasName)) aliasSignatures.add(signature);
+  }
+
+  return {
+    canonicalExact,
+    aliasExact,
+    canonicalSignatures,
+    aliasSignatures,
+  };
+}
+
+function hasUsableAuthorEvidence(authorNames: string[]) {
+  return authorNames.some(authorName => {
+    const normalized = normalizeName(authorName);
+    return Boolean(normalized) && normalized !== '...' && !normalized.includes(' et al');
+  });
+}
+
 function buildOpenAlexAbstract(abstractIndex: Record<string, number[]> | null | undefined) {
   if (!abstractIndex || typeof abstractIndex !== 'object') return null;
 
@@ -198,28 +399,148 @@ function buildOpenAlexAbstract(abstractIndex: Record<string, number[]> | null | 
   return abstract || null;
 }
 
-function resolveAuthorMatch(researcher: ResearcherWithAliases, authorNames: string[], source: SyncSource) {
+function resolveAuthorMatch(
+  researcher: ResearcherWithAliases,
+  authorNames: string[],
+  source: SyncSource,
+) {
   if (source === 'ORCID' && getResearcherOrcid(researcher)) {
     return { matchType: 'ORCID_MATCH', confidence: 1.0 };
   }
 
-  const canonical = normalizeName(researcher.canonicalName);
-  const aliases = new Set(researcher.aliases.map(alias => normalizeName(alias.aliasName)));
+  if (!hasUsableAuthorEvidence(authorNames)) {
+    return null;
+  }
+
+  const catalog = buildResearcherNameCatalog(researcher);
 
   for (const authorName of authorNames) {
     const normalizedAuthor = normalizeName(authorName);
     if (!normalizedAuthor) continue;
 
-    if (normalizedAuthor === canonical) {
+    if (catalog.canonicalExact.has(normalizedAuthor)) {
       return { matchType: 'EXACT_NAME_MATCH', confidence: 0.98 };
     }
 
-    if (aliases.has(normalizedAuthor)) {
+    if (catalog.aliasExact.has(normalizedAuthor)) {
       return { matchType: 'ALIAS_MATCH', confidence: 0.92 };
+    }
+
+    const authorSignatures = buildNameSignatures(authorName);
+    if (Array.from(authorSignatures).some(signature => catalog.canonicalSignatures.has(signature))) {
+      return { matchType: 'INITIALS_MATCH', confidence: 0.88 };
+    }
+
+    if (Array.from(authorSignatures).some(signature => catalog.aliasSignatures.has(signature))) {
+      return { matchType: 'INITIALS_MATCH', confidence: 0.84 };
     }
   }
 
   return null;
+}
+
+type AuthorMatchResolution = NonNullable<ReturnType<typeof resolveAuthorMatch>>;
+
+function getVerificationStatusPriority(status: string | null | undefined) {
+  const priorities: Record<string, number> = {
+    UNVERIFIED: 0,
+    NEEDS_REVIEW: 1,
+    VERIFIED: 2,
+  };
+
+  return priorities[status || 'UNVERIFIED'] ?? 0;
+}
+
+function pickHigherVerificationStatus(
+  currentStatus: string | null | undefined,
+  candidateStatus: string,
+) {
+  return getVerificationStatusPriority(candidateStatus) > getVerificationStatusPriority(currentStatus)
+    ? candidateStatus
+    : currentStatus || 'UNVERIFIED';
+}
+
+function inferAutomaticVerificationStatus(args: {
+  publication: {
+    verifiedStatus: string;
+    sourcePrimary: string;
+    doi: string | null;
+    pubmedId: string | null;
+    sourceRecords?: Array<{ source: string }>;
+  } | null;
+  candidate: PublicationCandidate;
+  authorMatch: AuthorMatchResolution;
+  trustedExistingLink: boolean;
+}) {
+  const { publication, candidate, authorMatch, trustedExistingLink } = args;
+
+  if (publication && publication.verifiedStatus !== 'UNVERIFIED') {
+    return publication.verifiedStatus;
+  }
+
+  if (authorMatch.matchType === 'ORCID_MATCH') {
+    return 'VERIFIED';
+  }
+
+  const effectiveDoi = publication?.doi || candidate.doi;
+  const effectivePubmedId = publication?.pubmedId || candidate.pubmedId;
+  const effectivePrimarySource = publication?.sourcePrimary || candidate.source;
+  const effectiveSources = new Set<string>([
+    effectivePrimarySource,
+    candidate.source,
+    ...(publication?.sourceRecords?.map(record => record.source) || []),
+  ]);
+
+  const hasStructuredIdentifier = Boolean(effectiveDoi || effectivePubmedId);
+  const hasNonScholarSupport = Array.from(effectiveSources).some(source => source !== 'GOOGLE_SCHOLAR');
+  const hasStrongAuthorMatch = ['EXACT_NAME_MATCH', 'ALIAS_MATCH', 'INITIALS_MATCH'].includes(authorMatch.matchType);
+
+  if (hasStrongAuthorMatch && (hasStructuredIdentifier || hasNonScholarSupport || trustedExistingLink)) {
+    return 'VERIFIED';
+  }
+
+  if (candidate.source === 'GOOGLE_SCHOLAR' || effectivePrimarySource === 'GOOGLE_SCHOLAR') {
+    return 'NEEDS_REVIEW';
+  }
+
+  return 'UNVERIFIED';
+}
+
+async function hasTrustedExistingResearcherLink(publicationId: string, researcherId: string) {
+  const existingMatch = await prisma.publicationResearcherMatch.findFirst({
+    where: {
+      publicationId,
+      researcherId,
+      manuallyExcluded: false,
+    },
+    include: {
+      publication: {
+        select: {
+          sourcePrimary: true,
+          doi: true,
+          pubmedId: true,
+          sourceRecords: {
+            select: { source: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!existingMatch) return false;
+  if (['ORCID_MATCH', 'EXACT_NAME_MATCH', 'ALIAS_MATCH', 'INITIALS_MATCH', 'MANUAL_ASSIGNMENT'].includes(existingMatch.matchType)) {
+    return true;
+  }
+
+  if (existingMatch.publication.doi || existingMatch.publication.pubmedId) {
+    return true;
+  }
+
+  if (existingMatch.publication.sourcePrimary !== 'GOOGLE_SCHOLAR') {
+    return true;
+  }
+
+  return existingMatch.publication.sourceRecords.some(record => record.source !== 'GOOGLE_SCHOLAR');
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit) {
@@ -291,7 +612,10 @@ function mergePublicationCandidates(current: PublicationCandidate, incoming: Pub
     doi: current.doi || incoming.doi,
     pubmedId: current.pubmedId || incoming.pubmedId,
     title: mergeStringValue(current.title, incoming.title) || current.title,
-    journalName: mergeStringValue(current.journalName, incoming.journalName),
+    journalName: selectPreferredJournalName([
+      { journalName: current.journalName, source: current.source },
+      { journalName: incoming.journalName, source: incoming.source },
+    ]),
     abstract: mergeStringValue(current.abstract, incoming.abstract),
     publicationDate: current.publicationDate || incoming.publicationDate,
     publicationYear: current.publicationYear || incoming.publicationYear,
@@ -328,7 +652,8 @@ function dedupeCandidates(candidates: PublicationCandidate[]) {
   const deduped = new Map<string, PublicationCandidate>();
   const canonicalByKey = new Map<string, string>();
 
-  for (const candidate of candidates) {
+  for (const rawCandidate of candidates) {
+    const candidate = sanitizePublicationCandidate(rawCandidate);
     const keys = buildCandidateKeys(candidate);
     const matchedKey = keys.find(key => canonicalByKey.has(key));
 
@@ -789,54 +1114,34 @@ async function fetchGoogleScholarCandidates(researcher: ResearcherWithAliases) {
   if (!apiKey) {
     throw new Error('SERPAPI_KEY is not configured.');
   }
+  const scholarApiKey = apiKey;
 
-  const scholarAuthorId = getResearcherIdentifier(researcher, [
-    'GOOGLE_SCHOLAR_AUTHOR_ID',
-    'SCHOLAR_AUTHOR_ID',
-    'SCHOLAR_PROFILE_ID',
-  ]);
-
-  if (scholarAuthorId) {
-    const authorUrl = new URL('https://serpapi.com/search.json');
-    authorUrl.searchParams.set('engine', 'google_scholar_author');
-    authorUrl.searchParams.set('author_id', scholarAuthorId);
-    authorUrl.searchParams.set('sort', 'pubdate');
-    authorUrl.searchParams.set('hl', 'en');
-    authorUrl.searchParams.set('api_key', apiKey);
-
-    const authorData = await fetchJson<{
-      articles?: Array<{
-        title?: string;
-        citation_id?: string;
-        authors?: string;
-        publication?: string;
-        cited_by?: { value?: number; cites_id?: string };
-        year?: string;
-      }>;
-    }>(authorUrl.toString());
-
+  function mapGoogleScholarAuthorArticles(
+    articles: GoogleScholarAuthorArticle[],
+  ) {
     const authorCandidates: PublicationCandidate[] = [];
 
-    for (const item of authorData.articles || []) {
+    for (const item of articles) {
       if (!item.title) continue;
 
       const publicationYear = item.year ? Number(item.year) : null;
       const authorNames = item.authors
         ? item.authors.split(',').map(author => normalizeWhitespace(author)).filter(Boolean)
-        : [researcher.canonicalName];
+        : [];
       const publicationText = normalizeWhitespace(item.publication || '');
       const journalName = publicationText
         ? normalizeWhitespace(
             publicationText
               .replace(/\b(19|20)\d{2}\b/g, '')
               .replace(/\d+\s*\([^)]*\),?\s*\d.*$/g, '')
-              .replace(/,\s*\d.*$/g, '')
+              .replace(/,\s*\d.*$/g, ''),
           ) || null
         : null;
 
       authorCandidates.push({
         source: 'GOOGLE_SCHOLAR',
         externalId: item.citation_id || item.cited_by?.cites_id || item.title,
+        profileBacked: true,
         doi: null,
         pubmedId: null,
         title: item.title,
@@ -847,6 +1152,47 @@ async function fetchGoogleScholarCandidates(researcher: ResearcherWithAliases) {
         authorNames,
         citationCount: item.cited_by?.value ?? null,
       });
+    }
+
+    return authorCandidates;
+  }
+
+  function buildScholarAuthorPageUrl(nextUrl?: string | null) {
+    const url = nextUrl ? new URL(nextUrl) : new URL('https://serpapi.com/search.json');
+    url.searchParams.set('engine', 'google_scholar_author');
+    url.searchParams.set('hl', 'en');
+    url.searchParams.set('sort', 'pubdate');
+    url.searchParams.set('api_key', scholarApiKey);
+    return url.toString();
+  }
+
+  const scholarAuthorId = getResearcherIdentifier(researcher, [
+    'GOOGLE_SCHOLAR_AUTHOR_ID',
+    'SCHOLAR_AUTHOR_ID',
+    'SCHOLAR_PROFILE_ID',
+  ]);
+
+  if (scholarAuthorId) {
+    const authorCandidates: PublicationCandidate[] = [];
+    const visitedPageUrls = new Set<string>();
+    let authorPageUrl: string | null = buildScholarAuthorPageUrl();
+    authorPageUrl = (() => {
+      const url = new URL(authorPageUrl as string);
+      url.searchParams.set('author_id', scholarAuthorId);
+      return url.toString();
+    })();
+    let pageCount = 0;
+
+    while (authorPageUrl && !visitedPageUrls.has(authorPageUrl) && pageCount < 25) {
+      visitedPageUrls.add(authorPageUrl);
+      pageCount += 1;
+
+      const authorData: GoogleScholarAuthorResponse = await fetchJson(authorPageUrl);
+
+      authorCandidates.push(...mapGoogleScholarAuthorArticles(authorData.articles || []));
+      authorPageUrl = authorData.serpapi_pagination?.next
+        ? buildScholarAuthorPageUrl(authorData.serpapi_pagination.next)
+        : null;
     }
 
     if (authorCandidates.length > 0) {
@@ -864,7 +1210,7 @@ async function fetchGoogleScholarCandidates(researcher: ResearcherWithAliases) {
     url.searchParams.set('hl', 'en');
     url.searchParams.set('as_sdt', '0');
     url.searchParams.set('as_vis', '1');
-    url.searchParams.set('api_key', apiKey);
+    url.searchParams.set('api_key', scholarApiKey);
 
     const data = await fetchJson<{
       organic_results?: Array<{
@@ -909,6 +1255,7 @@ async function fetchGoogleScholarCandidates(researcher: ResearcherWithAliases) {
       candidates.push({
         source: 'GOOGLE_SCHOLAR',
         externalId,
+        profileBacked: false,
         doi: null,
         pubmedId: null,
         title: item.title,
@@ -951,17 +1298,47 @@ async function fetchCandidatesForSource(source: SyncSource, researcher: Research
 }
 
 async function persistCandidate(researcher: ResearcherWithAliases, candidate: PublicationCandidate) {
-  const authorMatch = resolveAuthorMatch(researcher, candidate.authorNames, candidate.source);
-  if (!authorMatch) return { created: 0, updated: 0 };
-
   const normalizedTitle = normalizeTitle(candidate.title);
   if (!normalizedTitle) return { created: 0, updated: 0 };
 
   let publication = await findExistingPublication(researcher, candidate, normalizedTitle);
+  let authorMatch = resolveAuthorMatch(
+    researcher,
+    candidate.authorNames,
+    candidate.source,
+  );
+
+  const trustedExistingLink = publication
+    ? await hasTrustedExistingResearcherLink(publication.id, researcher.id)
+    : false;
+
+  if (!authorMatch) {
+    if (!(candidate.source === 'GOOGLE_SCHOLAR' && trustedExistingLink)) {
+      return { created: 0, updated: 0 };
+    }
+
+    authorMatch = { matchType: 'TRUSTED_SOURCE_ENRICHMENT', confidence: 0.9 };
+  }
 
   let created = 0;
   let updated = 0;
   const alerts: Array<{ alertType: string; title: string; message: string; entityId: string; entityType: string }> = [];
+  let desiredVerifiedStatus =
+    publication?.verifiedStatus && publication.verifiedStatus !== 'UNVERIFIED'
+      ? publication.verifiedStatus
+      : inferAutomaticVerificationStatus({
+          publication: publication
+            ? {
+                verifiedStatus: publication.verifiedStatus,
+                sourcePrimary: publication.sourcePrimary,
+                doi: publication.doi,
+                pubmedId: publication.pubmedId,
+              }
+            : null,
+          candidate,
+          authorMatch,
+          trustedExistingLink,
+        });
 
   if (!publication) {
     publication = await prisma.publication.create({
@@ -975,7 +1352,7 @@ async function persistCandidate(researcher: ResearcherWithAliases, candidate: Pu
         journalName: candidate.journalName,
         abstract: candidate.abstract,
         sourcePrimary: candidate.source,
-        verifiedStatus: 'UNVERIFIED',
+        verifiedStatus: desiredVerifiedStatus,
       },
     });
     created = 1;
@@ -990,11 +1367,36 @@ async function persistCandidate(researcher: ResearcherWithAliases, candidate: Pu
     const updateData: Record<string, string | number | Date | null> = {};
     if (!publication.doi && candidate.doi) updateData.doi = candidate.doi;
     if (!publication.pubmedId && candidate.pubmedId) updateData.pubmedId = candidate.pubmedId;
-    if (!publication.journalName && candidate.journalName) updateData.journalName = candidate.journalName;
+    const preferredJournalName = selectPreferredJournalName([
+      { journalName: publication.journalName, source: publication.sourcePrimary },
+      { journalName: candidate.journalName, source: candidate.source },
+    ]);
+    if (preferredJournalName !== publication.journalName) {
+      updateData.journalName = preferredJournalName;
+    }
     if (!publication.abstract && candidate.abstract) updateData.abstract = candidate.abstract;
     if (!publication.publicationDate && candidate.publicationDate) updateData.publicationDate = candidate.publicationDate;
     if (!publication.publicationYear && candidate.publicationYear) updateData.publicationYear = candidate.publicationYear;
     if (publication.sourcePrimary === 'MANUAL') updateData.sourcePrimary = candidate.source;
+    desiredVerifiedStatus = inferAutomaticVerificationStatus({
+      publication: {
+        verifiedStatus: publication.verifiedStatus,
+        sourcePrimary: String(updateData.sourcePrimary || publication.sourcePrimary),
+        doi: (updateData.doi as string | null | undefined) ?? publication.doi,
+        pubmedId: (updateData.pubmedId as string | null | undefined) ?? publication.pubmedId,
+        sourceRecords: await prisma.sourceRecord.findMany({
+          where: { publicationId: publication.id },
+          select: { source: true },
+        }),
+      },
+      candidate,
+      authorMatch,
+      trustedExistingLink,
+    });
+    const nextVerifiedStatus = pickHigherVerificationStatus(publication.verifiedStatus, desiredVerifiedStatus);
+    if (nextVerifiedStatus !== publication.verifiedStatus) {
+      updateData.verifiedStatus = nextVerifiedStatus;
+    }
 
     if (Object.keys(updateData).length > 0) {
       publication = await prisma.publication.update({

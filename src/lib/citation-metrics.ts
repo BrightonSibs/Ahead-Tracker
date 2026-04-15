@@ -82,7 +82,11 @@ export function buildCumulativeCitationCountByYear(
 }
 
 export function getLatestCitationCount(citations: CitationSnapshot[]) {
-  if (citations.length === 0) return 0;
+  return getLatestCitationCountOrNull(citations) ?? 0;
+}
+
+export function getLatestCitationCountOrNull(citations: CitationSnapshot[]) {
+  if (citations.length === 0) return null;
 
   return citations.reduce((latest, citation) => (
     citation.capturedAt > latest.capturedAt ? citation : latest

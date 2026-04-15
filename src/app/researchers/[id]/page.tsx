@@ -7,7 +7,7 @@ import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/lay
 import { Card, CardHeader, CardTitle, Button, Spinner, StatRow, Tabs, Toggle, Alert } from '@/components/ui';
 import { CitationTrendChart } from '@/components/charts/lazy';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
-import { departmentColor, matchTypeBadgeColor, matchTypeLabel } from '@/lib/utils';
+import { departmentColor, formatCitationCount, matchTypeBadgeColor, matchTypeLabel } from '@/lib/utils';
 
 export default function ResearcherProfilePage() {
   const params = useParams<{ id: string }>();
@@ -274,10 +274,16 @@ export default function ResearcherProfilePage() {
           <div className="space-y-5 lg:col-span-3">
             <StatRow stats={[
               { label: 'Publications', value: researcher.publicationCount, color: 'text-gray-900' },
-              { label: 'Total Citations', value: (researcher.totalCitations ?? 0).toLocaleString(), color: 'text-brand-700' },
+              { label: 'Captured Citations', value: (researcher.totalCitations ?? 0).toLocaleString(), color: 'text-brand-700' },
               { label: 'h-index', value: researcher.hIndex ?? 0, color: 'text-green-700' },
               { label: 'i10-index', value: researcher.i10Index ?? 0, color: 'text-teal-700' },
             ]} />
+
+            {typeof researcher.publicationsWithoutCitationData === 'number' && researcher.publicationsWithoutCitationData > 0 && (
+              <p className="text-sm text-gray-600">
+                Citation totals currently cover {researcher.publicationsWithCitationData?.toLocaleString() || 0} of {researcher.publicationCount} matched publications.
+              </p>
+            )}
 
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <Card>
@@ -351,7 +357,7 @@ export default function ResearcherProfilePage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Title</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Journal</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Year</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Citations</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Captured Citations</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Match</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">SLU</th>
                     <th className="px-4 py-3" />
@@ -371,8 +377,12 @@ export default function ResearcherProfilePage() {
                       </td>
                       <td className="px-4 py-3 text-right text-sm text-gray-600">{match.publication.publicationYear || '-'}</td>
                       <td className="px-4 py-3 text-right">
-                        <span className="text-sm font-semibold text-brand-700">
-                          {match.publication.citations?.[0]?.citationCount ?? 0}
+                        <span className={`text-sm font-semibold ${match.publication.citations?.length ? 'text-brand-700' : 'text-gray-400'}`}>
+                          {formatCitationCount(
+                            match.publication.citations?.length
+                              ? match.publication.citations[match.publication.citations.length - 1]?.citationCount
+                              : null,
+                          )}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -434,7 +444,7 @@ export default function ResearcherProfilePage() {
                 </p>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <p className="uppercase tracking-wide text-gray-400">Shared Citations</p>
+                    <p className="uppercase tracking-wide text-gray-400">Shared Captured Citations</p>
                     <p className="mt-1 font-semibold text-gray-800">{(collaborator.sharedCitations ?? 0).toLocaleString()}</p>
                   </div>
                   <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">

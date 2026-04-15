@@ -14,6 +14,7 @@ interface Node {
   canonicalName: string;
   department: string;
   publicationCount: number;
+  publicationsWithCitationData: number;
   totalCitations: number;
   hIndex: number;
   x: number;
@@ -124,6 +125,7 @@ export default function CollaborationsPage() {
         canonicalName: researcher.canonicalName || researcher.name,
         department: researcher.department,
         publicationCount: researcher.publicationCount,
+        publicationsWithCitationData: researcher.publicationsWithCitationData || 0,
         totalCitations: researcher.totalCitations || 0,
         hIndex: researcher.hIndex || 0,
         x: laneCenterX + Math.cos(angle) * orbit + (Math.random() - 0.5) * 18,
@@ -472,7 +474,7 @@ export default function CollaborationsPage() {
 
   return (
     <PageLayout>
-      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph across departments" />
+      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph across departments; citation values use latest stored snapshots" />
       <PageContent>
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
           <div className="space-y-4 lg:col-span-3">
@@ -590,7 +592,7 @@ export default function CollaborationsPage() {
                 <div className="mb-3 grid grid-cols-3 gap-2">
                   {[
                     { label: 'Pubs', value: selected.publicationCount },
-                    { label: 'Citations', value: selected.totalCitations },
+                    { label: 'Captured Citations', value: selected.totalCitations.toLocaleString() },
                     { label: 'h-index', value: selected.hIndex },
                   ].map(stat => (
                     <div key={stat.label} className="rounded-lg bg-gray-50 p-2 text-center">
@@ -599,6 +601,9 @@ export default function CollaborationsPage() {
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-gray-500">
+                  Citation totals currently cover {selected.publicationsWithCitationData}/{selected.publicationCount} matched publications for this researcher.
+                </p>
                 <Link href={`/researchers/${selected.id}`}>
                   <Button variant="outline" size="sm" className="w-full">View Full Profile</Button>
                 </Link>

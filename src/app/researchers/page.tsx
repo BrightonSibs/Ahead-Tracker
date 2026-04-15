@@ -106,7 +106,7 @@ function ResearchersPageContent() {
             color="amber"
             icon="L"
           />
-          <KpiCard label="Total Citations" value={(summary?.totalCitations ?? 0).toLocaleString()} color="green" icon="C" />
+          <KpiCard label="Captured Citations" value={(summary?.totalCitations ?? 0).toLocaleString()} color="green" icon="C" />
         </div>
 
         <FilterBar filters={[
@@ -131,6 +131,7 @@ function ResearchersPageContent() {
             <div className="border-b border-gray-100 bg-gray-50/40 px-4 py-3 text-xs text-gray-600">
               Profile completeness reflects how complete each researcher record is.
               It is based on name, ORCID, SLU start date, aliases, and specialties.
+              Citation totals on this page use the latest stored citation snapshot per publication.
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -141,7 +142,7 @@ function ResearchersPageContent() {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">ORCID</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">SLU Start</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Publications</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Citations</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Captured Citations</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">h-index</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aliases</th>
                     <th

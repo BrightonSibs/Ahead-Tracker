@@ -111,17 +111,17 @@ export default function DashboardPage() {
                   icon="P"
                 />
                 <KpiCard
-                  label="Total Citations"
+                  label="Captured Citations"
                   value={(stats?.totalCitations ?? 0).toLocaleString()}
-                  sub="Current total across all publications"
+                  sub="Latest stored totals across publications with citation snapshots"
                   color="teal"
                   icon="C"
                   delta={`${(stats?.citationsThisYear ?? 0).toLocaleString()} observed growth in ${new Date().getFullYear()} so far`}
                 />
                 <KpiCard
-                  label="Avg Citations / Article"
+                  label="Avg Captured Citations"
                   value={stats?.avgCitationsPerArticle ?? 0}
-                  sub="Based on displayed publication set"
+                  sub="Per publication with at least one citation snapshot"
                   color="green"
                   icon="A"
                 />
@@ -135,6 +135,14 @@ export default function DashboardPage() {
               </>
             )}
           </div>
+
+          {!summaryLoading && typeof stats?.publicationsWithoutCitationData === 'number' && stats.publicationsWithoutCitationData > 0 && (
+            <div className="text-sm text-gray-600">
+              Citation aggregates currently cover {stats.publicationsWithCitationData?.toLocaleString() || 0} publications with snapshots.
+              {` `}
+              {stats.publicationsWithoutCitationData.toLocaleString()} matched publications still have no citation snapshot and are excluded from captured-citation averages.
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
             <Card className="lg:col-span-2">
@@ -261,7 +269,7 @@ export default function DashboardPage() {
                         </div>
                         <div className="flex-shrink-0 text-right">
                           <div className="text-sm font-bold text-gray-900">h={researcher.hIndex}</div>
-                          <div className="text-xs text-gray-400">{researcher.totalCitations.toLocaleString()} cit.</div>
+                          <div className="text-xs text-gray-400">{researcher.totalCitations.toLocaleString()} captured cit.</div>
                         </div>
                       </div>
                     </Link>

@@ -6,7 +6,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/layout';
 import { Card, Button, Spinner, EmptyState } from '@/components/ui';
 import { fetchJsonCached } from '@/lib/client-cache';
-import { departmentColor, sourceBadgeColor, sourceLabel } from '@/lib/utils';
+import { departmentColor, formatCitationCount, sourceBadgeColor, sourceLabel } from '@/lib/utils';
 import type { DepartmentSummary, PublicationSummary, PaginatedResult } from '@/types';
 
 const SOURCE_OPTIONS = [
@@ -378,7 +378,9 @@ function PublicationsPageContent() {
                       </td>
 
                       <td className="px-4 py-3 text-right">
-                        <span className="text-sm font-bold text-brand-700">{publication.latestCitations.toLocaleString()}</span>
+                        <span className={`text-sm font-bold ${publication.latestCitations == null ? 'text-gray-400' : 'text-brand-700'}`}>
+                          {formatCitationCount(publication.latestCitations)}
+                        </span>
                       </td>
 
                       <td className="px-4 py-3">

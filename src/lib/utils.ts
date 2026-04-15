@@ -29,6 +29,11 @@ export function formatYear(date: Date | string | null | undefined): string {
   return new Date(date).getFullYear().toString();
 }
 
+export function formatCitationCount(value: number | null | undefined, fallback = '-'): string {
+  if (value == null) return fallback;
+  return value.toLocaleString('en-US');
+}
+
 export function truncate(str: string, maxLen = 80): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 1) + '…';
@@ -95,6 +100,8 @@ export function matchTypeLabel(matchType: string): string {
     ORCID_MATCH: 'ORCID',
     EXACT_NAME_MATCH: 'Canonical name',
     ALIAS_MATCH: 'Approved alias',
+    INITIALS_MATCH: 'Initials / reordered',
+    TRUSTED_SOURCE_ENRICHMENT: 'Trusted source',
     MANUAL_ASSIGNMENT: 'Manual',
   };
 
@@ -106,6 +113,8 @@ export function matchTypeBadgeColor(matchType: string): string {
     ORCID_MATCH: 'border border-teal-200 bg-teal-50 text-teal-700',
     EXACT_NAME_MATCH: 'border border-brand-200 bg-brand-50 text-brand-800',
     ALIAS_MATCH: 'border border-gray-300 bg-white text-gray-800',
+    INITIALS_MATCH: 'border border-slate-300 bg-slate-50 text-slate-700',
+    TRUSTED_SOURCE_ENRICHMENT: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
     MANUAL_ASSIGNMENT: 'border border-amber-200 bg-amber-50 text-amber-700',
   };
 

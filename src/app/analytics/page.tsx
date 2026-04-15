@@ -108,7 +108,7 @@ export default function AnalyticsPage() {
       <PageContent>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Total Publications" value={dashboard?.totalPublications ?? '-'} color="blue" icon="P" />
-          <KpiCard label="Total Citations" value={(dashboard?.totalCitations ?? 0).toLocaleString()} color="teal" icon="C" />
+          <KpiCard label="Captured Citations" value={(dashboard?.totalCitations ?? 0).toLocaleString()} color="teal" icon="C" />
           <KpiCard
             label="Observed Citation Growth"
             value={(dashboard?.citationsThisYear ?? 0).toLocaleString()}
@@ -116,8 +116,16 @@ export default function AnalyticsPage() {
             color="green"
             icon="G"
           />
-          <KpiCard label="Avg Citations / Article" value={dashboard?.avgCitationsPerArticle ?? '-'} color="amber" icon="A" />
+          <KpiCard label="Avg Captured Citations" value={dashboard?.avgCitationsPerArticle ?? '-'} sub="Per publication with citation snapshots" color="amber" icon="A" />
         </div>
+
+        {!loading && typeof dashboard?.publicationsWithoutCitationData === 'number' && dashboard.publicationsWithoutCitationData > 0 && (
+          <div className="text-sm text-gray-600">
+            Analytics citation totals currently cover {dashboard.publicationsWithCitationData?.toLocaleString() || 0} publications with snapshots.
+            {` `}
+            {dashboard.publicationsWithoutCitationData.toLocaleString()} matched publications do not yet have citation snapshot data.
+          </div>
+        )}
 
         <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
@@ -160,7 +168,7 @@ export default function AnalyticsPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-gray-50">
-                          {['#', 'Researcher', 'Dept', 'Publications', 'Total Citations', 'Avg Citations', 'h-index', 'i10-index'].map((header, index) => (
+                          {['#', 'Researcher', 'Dept', 'Publications', 'Captured Citations', 'Avg Captured Cit.', 'h-index', 'i10-index'].map((header, index) => (
                             <th
                               key={index}
                               className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${index >= 3 ? 'text-right' : 'text-left'}`}
@@ -196,7 +204,7 @@ export default function AnalyticsPage() {
                               {researcher.totalCitations.toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-right text-sm text-gray-600">
-                              {researcher.publications > 0 ? (researcher.totalCitations / researcher.publications).toFixed(1) : '0'}
+                              {researcher.avgCitationsPerSnapshottedPublication != null ? researcher.avgCitationsPerSnapshottedPublication.toFixed(1) : '-'}
                             </td>
                             <td className="px-4 py-3 text-right">
                               <span
@@ -254,7 +262,7 @@ export default function AnalyticsPage() {
                     <CardHeader>
                       <div>
                         <CardTitle>Per-Researcher Citation Growth</CardTitle>
-                        <p className="mt-0.5 text-xs text-gray-500">Top 6 researchers by total citations, using observed growth only</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Top 6 researchers by captured citations, using observed growth only</p>
                       </div>
                     </CardHeader>
                     <ResearcherCitationChart researcherStats={data?.researcherStats?.slice(0, 6) || []} mode="growth" />
@@ -299,7 +307,7 @@ export default function AnalyticsPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-gray-50">
-                          {['Researcher', 'Dept', 'h-index', 'i10-index', 'Total Citations', 'Publications', 'Avg Cit/Article'].map((header, index) => (
+                          {['Researcher', 'Dept', 'h-index', 'i10-index', 'Captured Citations', 'Publications', 'Avg Captured Cit.'].map((header, index) => (
                             <th
                               key={index}
                               className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${index >= 2 ? 'text-right' : 'text-left'}`}
@@ -337,7 +345,7 @@ export default function AnalyticsPage() {
                             </td>
                             <td className="px-4 py-3 text-right text-sm text-gray-600">{researcher.publications}</td>
                             <td className="px-4 py-3 text-right text-sm text-gray-600">
-                              {researcher.publications > 0 ? (researcher.totalCitations / researcher.publications).toFixed(1) : '0'}
+                              {researcher.avgCitationsPerSnapshottedPublication != null ? researcher.avgCitationsPerSnapshottedPublication.toFixed(1) : '-'}
                             </td>
                           </tr>
                         ))}

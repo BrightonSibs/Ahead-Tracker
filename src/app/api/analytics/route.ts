@@ -26,16 +26,18 @@ function buildCitationSummaries(
 
   let totalCitations = 0;
   let citationsThisYear = 0;
+  let publicationsWithCitationData = 0;
 
   for (const publicationCitations of citationsByPublication.values()) {
     const latestCount = publicationCitations[publicationCitations.length - 1]?.citationCount ?? 0;
     totalCitations += latestCount;
+    publicationsWithCitationData += 1;
 
     const growthByYear = buildObservedCitationGrowthByYear(publicationCitations);
     citationsThisYear += growthByYear[currentYear] ?? 0;
   }
 
-  return { totalCitations, citationsThisYear };
+  return { totalCitations, citationsThisYear, publicationsWithCitationData };
 }
 
 export async function GET(req: NextRequest) {
@@ -97,8 +99,9 @@ export async function GET(req: NextRequest) {
             select: { publicationId: true, citationCount: true, capturedAt: true },
           })
         : [];
-      const { totalCitations, citationsThisYear } = buildCitationSummaries(citationHistory, thisYear);
-      const avgCit = pubCount > 0 ? (totalCitations / pubCount).toFixed(1) : '0';
+      const { totalCitations, citationsThisYear, publicationsWithCitationData } = buildCitationSummaries(citationHistory, thisYear);
+      const publicationsWithoutCitationData = Math.max(0, pubCount - publicationsWithCitationData);
+      const avgCit = publicationsWithCitationData > 0 ? (totalCitations / publicationsWithCitationData).toFixed(1) : '0';
 
       const latestByPublication = new Map<string, number>();
       for (const citation of citationHistory) {
@@ -149,7 +152,10 @@ export async function GET(req: NextRequest) {
         name: item.shortName || item.name || item.code,
         color: item.color || departmentHexColor(item.code),
         publications: publicationIdsByDepartment.get(item.code)?.size ?? 0,
-        citations: 0,
+        citations: Array.from(publicationIdsByDepartment.get(item.code) || []).reduce(
+          (sum, publicationId) => sum + (latestByPublication.get(publicationId) ?? 0),
+          0,
+        ),
       }));
 
       return NextResponse.json({
@@ -158,6 +164,8 @@ export async function GET(req: NextRequest) {
         totalCitations,
         avgCitationsPerArticle: Number(avgCit),
         citationsThisYear,
+        publicationsWithCitationData,
+        publicationsWithoutCitationData,
         alerts: alerts.map(alert => ({ ...alert, createdAt: alert.createdAt.toISOString() })),
         recentJobs: recentJobs.map(job => ({
           ...job,

@@ -3,6 +3,7 @@ import {
   buildCumulativeCitationCountByYear,
   buildObservedCitationGrowthByYear,
   getLatestCitationCount,
+  getLatestCitationCountOrNull,
 } from '@/lib/citation-metrics';
 import { calcHIndex, calcI10Index } from '@/lib/utils';
 import type { ResearcherSummary } from '@/types';
@@ -204,9 +205,9 @@ export async function getResearcherById(id: string, sluOnly = false) {
 
   if (!researcher) return null;
 
-  const citations = researcher.matches.map(m =>
-    getLatestCitationCount(m.publication.citations)
-  );
+  const citationValues = researcher.matches.map(match => getLatestCitationCountOrNull(match.publication.citations));
+  const citations = citationValues.map(value => value ?? 0);
+  const publicationsWithCitationData = citationValues.filter((value): value is number => value !== null).length;
 
   const totalCitations = citations.reduce((a, b) => a + b, 0);
   const hIndex = calcHIndex(citations);
@@ -266,7 +267,7 @@ export async function getResearcherById(id: string, sluOnly = false) {
       {
         title: match.publication.title,
         publicationYear: match.publication.publicationYear,
-        latestCitations: getLatestCitationCount(match.publication.citations),
+        latestCitations: getLatestCitationCountOrNull(match.publication.citations),
       },
     ]),
   );
@@ -323,6 +324,8 @@ export async function getResearcherById(id: string, sluOnly = false) {
     ...researcher,
     sluStartDate: researcher.sluStartDate?.toISOString() ?? null,
     totalCitations,
+    publicationsWithCitationData,
+    publicationsWithoutCitationData: researcher.matches.length - publicationsWithCitationData,
     hIndex,
     i10Index,
     publicationCount: researcher.matches.length,
@@ -393,6 +396,7 @@ export async function getCollaborationNetwork(department?: string) {
     canonicalName: r.canonicalName,
     department: r.department,
     publicationCount: (matchesByResearcher.get(r.id) || []).length,
+    publicationsWithCitationData: (matchesByResearcher.get(r.id) || []).filter(publicationId => latestCitations.has(publicationId)).length,
     totalCitations: (matchesByResearcher.get(r.id) || []).reduce((sum, publicationId) => sum + (latestCitations.get(publicationId) ?? 0), 0),
     hIndex: calcHIndex((matchesByResearcher.get(r.id) || []).map(publicationId => latestCitations.get(publicationId) ?? 0)),
   }));

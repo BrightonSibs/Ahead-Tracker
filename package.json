@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "smoke": "node scripts/smoke-check.mjs",
+    "audit:final": "node scripts/final-audit.mjs",
     "prisma:generate": "prisma generate",
     "db:setup": "prisma generate && prisma db push && ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed.ts",
     "db:push": "prisma db push",
@@ -21,6 +22,12 @@
     "db:dedupe-publications": "node scripts/dedupe-publications.js --apply",
     "db:clean-name-matches:check": "node scripts/clean-name-matches.js",
     "db:clean-name-matches": "node scripts/clean-name-matches.js --apply",
+    "db:exclude-questionable-scholar-matches:check": "node scripts/exclude-questionable-scholar-matches.js",
+    "db:exclude-questionable-scholar-matches": "node scripts/exclude-questionable-scholar-matches.js --apply",
+    "db:repair-journal-names:check": "node scripts/repair-journal-names.js",
+    "db:repair-journal-names": "node scripts/repair-journal-names.js --apply",
+    "db:recompute-publication-statuses:check": "node scripts/recompute-publication-statuses.js",
+    "db:recompute-publication-statuses": "node scripts/recompute-publication-statuses.js --apply",
     "postinstall": "prisma generate"
   },
   "dependencies": {

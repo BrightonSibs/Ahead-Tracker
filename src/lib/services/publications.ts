@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import {
   buildCumulativeCitationCountByYear,
   buildObservedCitationGrowthByYear,
+  getLatestCitationCountOrNull,
 } from '@/lib/citation-metrics';
 import { getAllDepartments } from '@/lib/services/departments';
 import { departmentHexColor } from '@/lib/utils';
@@ -178,7 +179,7 @@ function mapPublicationSummary(
     publicationDate: publication.publicationDate?.toISOString() ?? null,
     publicationYear: publication.publicationYear,
     journalName: publication.journalName,
-    latestCitations: publication.citations[0]?.citationCount ?? 0,
+    latestCitations: publication.citations[0]?.citationCount ?? null,
     impactFactor: getPublicationImpactFactor(publication, metricLookup),
     verifiedStatus: publication.verifiedStatus,
     sourcePrimary: publication.sourcePrimary,
@@ -344,9 +345,7 @@ export async function getPublicationById(id: string) {
     publicationDate: pub.publicationDate?.toISOString() ?? null,
     impactFactor: journalMetric?.impactFactor ?? null,
     citationHistory,
-    latestCitationCount: pub.citations.length > 0
-      ? pub.citations[pub.citations.length - 1].citationCount
-      : 0,
+    latestCitationCount: getLatestCitationCountOrNull(pub.citations),
   };
 }
 
@@ -483,11 +482,9 @@ export async function getAnalyticsData(filters: FilterState = {}) {
 
   const { calcHIndex, calcI10Index } = await import('@/lib/utils');
   const researcherStats = researchers.map(researcher => {
-    const citations = researcher.matches.map(match =>
-      match.publication.citations.length > 0
-        ? match.publication.citations[match.publication.citations.length - 1].citationCount
-        : 0,
-    );
+    const citationValues = researcher.matches.map(match => getLatestCitationCountOrNull(match.publication.citations));
+    const citations = citationValues.map(value => value ?? 0);
+    const publicationsWithCitationData = citationValues.filter((value): value is number => value !== null).length;
     const impactFactors = researcher.matches
       .map(match => getPublicationImpactFactor(match.publication, metricLookup))
       .filter((value): value is number => value !== null);
@@ -515,6 +512,10 @@ export async function getAnalyticsData(filters: FilterState = {}) {
       department: researcher.department,
       publications: researcher.matches.length,
       totalCitations: citations.reduce((sum, count) => sum + count, 0),
+      publicationsWithCitationData,
+      avgCitationsPerSnapshottedPublication: publicationsWithCitationData > 0
+        ? Number((citations.reduce((sum, count) => sum + count, 0) / publicationsWithCitationData).toFixed(1))
+        : null,
       hIndex: calcHIndex(citations),
       i10Index: calcI10Index(citations),
       avgImpactFactor: impactFactors.length > 0

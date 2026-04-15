@@ -36,7 +36,7 @@ export interface PublicationSummary {
   publicationDate: string | null;
   publicationYear: number | null;
   journalName: string | null;
-  latestCitations: number;
+  latestCitations: number | null;
   impactFactor: number | null;
   verifiedStatus: string;
   sourcePrimary: string;

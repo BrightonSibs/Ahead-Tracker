@@ -12,6 +12,7 @@ import {
   sourceBadgeColor,
   sourceLabel,
   departmentColor,
+  formatCitationCount,
   formatDate,
   matchTypeBadgeColor,
   matchTypeLabel,
@@ -227,9 +228,7 @@ export default function PublicationDetailPage() {
     );
   }
 
-  const latestCit = pub.citations?.length > 0
-    ? pub.citations[pub.citations.length - 1].citationCount
-    : 0;
+  const latestCit = pub.latestCitationCount ?? null;
 
   const matchedResearcherIds = new Set((pub.matches || []).map((match: any) => match.researcher.id));
   const assignableResearchers = researchers.filter(researcher => !matchedResearcherIds.has(researcher.id));
@@ -361,7 +360,9 @@ export default function PublicationDetailPage() {
                 <CardTitle>Citation History</CardTitle>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-gray-500">{pub.citations?.length || 0} snapshots</span>
-                  <span className="text-xl font-bold font-display text-brand-700">{latestCit.toLocaleString()}</span>
+                  <span className={`text-xl font-bold font-display ${latestCit == null ? 'text-gray-400' : 'text-brand-700'}`}>
+                    {formatCitationCount(latestCit)}
+                  </span>
                 </div>
               </CardHeader>
               {chartData.length > 1 ? (
@@ -370,7 +371,9 @@ export default function PublicationDetailPage() {
                   keys={[{ key: 'citations', name: 'Citations', color: '#1a6fb5' }]}
                 />
               ) : (
-                <p className="py-8 text-center text-sm text-gray-400">Insufficient citation history for trend chart.</p>
+                <p className="py-8 text-center text-sm text-gray-400">
+                  {pub.citations?.length ? 'Insufficient citation history for trend chart.' : 'No citation snapshots captured yet.'}
+                </p>
               )}
 
               {pub.citationHistory?.length > 0 && (
@@ -424,7 +427,7 @@ export default function PublicationDetailPage() {
           <div className="space-y-5">
             <Card>
               <StatRow stats={[
-                { label: 'Citations', value: latestCit.toLocaleString(), color: 'text-brand-700' },
+                { label: 'Citations', value: formatCitationCount(latestCit), color: latestCit == null ? 'text-gray-500' : 'text-brand-700' },
                 { label: 'IF', value: pub.impactFactor?.toFixed(1) ?? '-', color: 'text-green-700' },
               ]} />
             </Card>

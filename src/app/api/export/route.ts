@@ -139,6 +139,10 @@ function csvEscape(value: string | number | null | undefined) {
   return `"${stringValue.replace(/"/g, '""')}"`;
 }
 
+function getLatestCitationValue(citations: Array<{ citationCount: number }> | undefined) {
+  return citations?.[0]?.citationCount ?? null;
+}
+
 async function buildPdfReport(filters: ExportFilters) {
   const [{ jsPDF }, _autoTable, publications, researchers] = await Promise.all([
     import('jspdf'),
@@ -172,7 +176,7 @@ async function buildPdfReport(filters: ExportFilters) {
       publication.journalName || '-',
       publication.publicationYear || '-',
       publication.matches.map(match => match.researcher.canonicalName).join('; '),
-      publication.citations[0]?.citationCount ?? 0,
+      getLatestCitationValue(publication.citations) ?? '',
       publication.specialties.map(specialty => specialty.specialty.name).join('; '),
     ]),
     styles: { fontSize: 8, cellPadding: 4 },
@@ -226,7 +230,7 @@ export async function GET(req: NextRequest) {
           csvEscape(publication.authors.map(author => author.authorName).join('; ')),
           csvEscape(publication.matches.map(match => match.researcher.canonicalName).join('; ')),
           csvEscape(Array.from(new Set(publication.matches.map(match => match.researcher.department))).join('; ')),
-          publication.citations[0]?.citationCount ?? 0,
+          getLatestCitationValue(publication.citations) ?? '',
           csvEscape(publication.specialties.map(specialty => specialty.specialty.name).join('; ')),
           publication.verifiedStatus,
         ].join(',')),
