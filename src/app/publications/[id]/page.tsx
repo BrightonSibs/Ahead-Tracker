@@ -8,6 +8,7 @@ import { PageLayout, PageContent, TopBar, TopBarActions } from '@/components/lay
 import { Card, CardHeader, CardTitle, Button, Spinner, Alert, StatRow } from '@/components/ui';
 import { CitationTrendChart } from '@/components/charts/lazy';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/client-cache';
+import { buildDoiUrl } from '@/lib/doi';
 import {
   sourceBadgeColor,
   sourceLabel,
@@ -23,6 +24,149 @@ type ResearcherOption = {
   canonicalName: string;
   department: string;
 };
+
+type ExternalPublicationLink = {
+  href: string;
+  label: string;
+  source: string;
+};
+
+function buildPubMedUrl(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = String(value).trim().match(/\d+/)?.[0];
+  return normalized ? `https://pubmed.ncbi.nlm.nih.gov/${normalized}/` : null;
+}
+
+function buildGoogleScholarCitationUrl(value: string | null | undefined) {
+  if (!value) return null;
+
+  const normalized = String(value).trim();
+  const separatorIndex = normalized.indexOf(':');
+  if (separatorIndex <= 0) return null;
+
+  const userId = normalized.slice(0, separatorIndex).trim();
+  const citationId = normalized.slice(separatorIndex + 1).trim();
+  if (!userId || !citationId) return null;
+
+  return `https://scholar.google.com/citations?view_op=view_citation&user=${encodeURIComponent(userId)}&citation_for_view=${encodeURIComponent(normalized)}`;
+}
+
+function buildGoogleScholarSearchUrl(value: string | null | undefined) {
+  const normalized = String(value || '').trim();
+  return normalized ? `https://scholar.google.com/scholar?q=${encodeURIComponent(normalized)}` : null;
+}
+
+function buildOpenAlexUrl(value: string | null | undefined) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  return `https://openalex.org/${encodeURIComponent(normalized)}`;
+}
+
+function parseRawSourceRecord(rawData: string | null | undefined) {
+  if (!rawData) return null;
+
+  try {
+    return JSON.parse(rawData);
+  } catch {
+    return null;
+  }
+}
+
+function buildSourceRecordLink(record: any, publication: any): ExternalPublicationLink | null {
+  const raw = parseRawSourceRecord(record?.rawData);
+  const effectiveDoi = publication?.doi || raw?.doi || null;
+  const effectivePubmedId = publication?.pubmedId || raw?.pubmedId || null;
+  const effectiveTitle = publication?.title || raw?.title || null;
+  const directScholarLink = typeof raw?.citationLink === 'string' ? raw.citationLink.trim() : '';
+  const scholarResourceLink = Array.isArray(raw?.resourceLinks)
+    ? raw.resourceLinks.find((resource: any) => typeof resource?.link === 'string' && resource.link.trim())?.link?.trim() || ''
+    : '';
+
+  if (record?.source === 'CROSSREF') {
+    const doiUrl = buildDoiUrl(effectiveDoi || record?.externalId);
+    return doiUrl ? { href: doiUrl, label: 'Publisher page', source: record.source } : null;
+  }
+
+  if (record?.source === 'PUBMED') {
+    const pubmedUrl = buildPubMedUrl(effectivePubmedId || record?.externalId);
+    return pubmedUrl ? { href: pubmedUrl, label: 'PubMed record', source: record.source } : null;
+  }
+
+  if (record?.source === 'EUROPE_PMC') {
+    if (effectivePubmedId) {
+      return {
+        href: `https://europepmc.org/article/MED/${encodeURIComponent(String(effectivePubmedId))}`,
+        label: 'Europe PMC record',
+        source: record.source,
+      };
+    }
+
+    const doiUrl = buildDoiUrl(effectiveDoi);
+    if (doiUrl) return { href: doiUrl, label: 'Publisher page', source: record.source };
+  }
+
+  if (record?.source === 'OPENALEX') {
+    const openAlexUrl = buildOpenAlexUrl(record?.externalId);
+    return openAlexUrl ? { href: openAlexUrl, label: 'OpenAlex record', source: record.source } : null;
+  }
+
+  if (record?.source === 'GOOGLE_SCHOLAR') {
+    if (directScholarLink) {
+      return { href: directScholarLink, label: 'Original article', source: record.source };
+    }
+
+    if (scholarResourceLink) {
+      return { href: scholarResourceLink, label: 'PDF / full text', source: record.source };
+    }
+
+    const citationUrl = buildGoogleScholarCitationUrl(record?.externalId || raw?.externalId);
+    if (citationUrl) {
+      return { href: citationUrl, label: 'Google Scholar record', source: record.source };
+    }
+
+    const scholarSearchUrl = buildGoogleScholarSearchUrl(effectiveTitle);
+    if (scholarSearchUrl) {
+      return { href: scholarSearchUrl, label: 'Search on Google Scholar', source: record.source };
+    }
+  }
+
+  if (record?.source === 'ORCID') {
+    const doiUrl = buildDoiUrl(effectiveDoi);
+    return doiUrl ? { href: doiUrl, label: 'Publisher page', source: record.source } : null;
+  }
+
+  return null;
+}
+
+function buildPublicationExternalLinks(publication: any) {
+  const links: ExternalPublicationLink[] = [];
+  const seen = new Set<string>();
+
+  const addLink = (link: ExternalPublicationLink | null) => {
+    if (!link || !link.href || seen.has(link.href)) return;
+    seen.add(link.href);
+    links.push(link);
+  };
+
+  addLink(buildDoiUrl(publication?.doi) ? {
+    href: buildDoiUrl(publication?.doi) as string,
+    label: 'Publisher page',
+    source: 'DOI',
+  } : null);
+
+  addLink(buildPubMedUrl(publication?.pubmedId) ? {
+    href: buildPubMedUrl(publication?.pubmedId) as string,
+    label: 'PubMed record',
+    source: 'PUBMED',
+  } : null);
+
+  for (const record of publication?.sourceRecords || []) {
+    addLink(buildSourceRecordLink(record, publication));
+  }
+
+  return links;
+}
 
 export default function PublicationDetailPage() {
   const params = useParams<{ id: string }>();
@@ -229,6 +373,10 @@ export default function PublicationDetailPage() {
   }
 
   const latestCit = pub.latestCitationCount ?? null;
+  const doiUrl = buildDoiUrl(pub.doi);
+  const pubmedUrl = buildPubMedUrl(pub.pubmedId);
+  const externalLinks = buildPublicationExternalLinks(pub);
+  const primaryExternalLink = externalLinks[0] || null;
 
   const matchedResearcherIds = new Set((pub.matches || []).map((match: any) => match.researcher.id));
   const assignableResearchers = researchers.filter(researcher => !matchedResearcherIds.has(researcher.id));
@@ -260,6 +408,11 @@ export default function PublicationDetailPage() {
         subtitle={`${pub.journalName || 'Unknown journal'} | ${pub.publicationYear || '-'}`}
         actions={
           <TopBarActions>
+            {primaryExternalLink && (
+              <a href={primaryExternalLink.href} target="_blank" rel="noopener noreferrer">
+                <Button variant="outline" size="sm">{primaryExternalLink.label}</Button>
+              </a>
+            )}
             <a href="/api/export?type=publications">
               <Button variant="outline" size="sm">Export</Button>
             </a>
@@ -303,9 +456,9 @@ export default function PublicationDetailPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {pub.doi && (
+                {doiUrl && pub.doi && (
                   <a
-                    href={`https://doi.org/${pub.doi}`}
+                    href={doiUrl}
                     target="_blank"
                     rel="noopener"
                     className="inline-flex items-center rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100"
@@ -313,15 +466,33 @@ export default function PublicationDetailPage() {
                     DOI: {pub.doi}
                   </a>
                 )}
-                {pub.pubmedId && (
+                {pubmedUrl && pub.pubmedId && (
                   <a
-                    href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pubmedId}`}
+                    href={pubmedUrl}
                     target="_blank"
                     rel="noopener"
                     className="inline-flex items-center rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100"
                   >
                     PubMed: {pub.pubmedId}
                   </a>
+                )}
+                {externalLinks
+                  .filter(link => link.href !== doiUrl && link.href !== pubmedUrl)
+                  .map(link => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                {!doiUrl && !pubmedUrl && externalLinks.length === 0 && (
+                  <span className="text-xs text-gray-400">
+                    No DOI, PubMed ID, or source landing page captured yet.
+                  </span>
                 )}
               </div>
 
@@ -516,18 +687,48 @@ export default function PublicationDetailPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500">Primary source</span>
-                  <span className={`rounded border px-2 py-0.5 text-[10px] font-medium ${sourceBadgeColor(pub.sourcePrimary)}`}>
-                    {sourceLabel(pub.sourcePrimary)}
-                  </span>
-                </div>
-                {pub.sourceRecords?.map((record: any) => (
-                  <div key={record.id} className="flex items-center justify-between gap-3">
-                    <span className="truncate text-[10px] text-gray-400 font-mono">{record.externalId?.slice(0, 24) || 'Imported record'}</span>
-                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${sourceBadgeColor(record.source)}`}>
-                      {sourceLabel(record.source)}
+                  <div className="flex items-center gap-2">
+                    {primaryExternalLink && (
+                      <a
+                        href={primaryExternalLink.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] font-medium text-brand-700 underline"
+                      >
+                        Open source
+                      </a>
+                    )}
+                    <span className={`rounded border px-2 py-0.5 text-[10px] font-medium ${sourceBadgeColor(pub.sourcePrimary)}`}>
+                      {sourceLabel(pub.sourcePrimary)}
                     </span>
                   </div>
-                ))}
+                </div>
+                {pub.sourceRecords?.map((record: any) => {
+                  const recordLink = buildSourceRecordLink(record, pub);
+
+                  return (
+                    <div key={record.id} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="block truncate font-mono text-[10px] text-gray-400">
+                          {record.externalId?.slice(0, 36) || 'Imported record'}
+                        </span>
+                        {recordLink && (
+                          <a
+                            href={recordLink.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] font-medium text-brand-700 underline"
+                          >
+                            {recordLink.label}
+                          </a>
+                        )}
+                      </div>
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${sourceBadgeColor(record.source)}`}>
+                        {sourceLabel(record.source)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
 

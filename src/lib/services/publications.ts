@@ -201,7 +201,7 @@ export async function getPublications(
   page = 1,
   pageSize = 25,
 ): Promise<PaginatedResult<PublicationSummary>> {
-  const where: any = {};
+  const where: any = filters.verifiedStatus ? {} : { verifiedStatus: { not: 'EXCLUDED' } };
 
   if (filters.keyword) {
     where.OR = [
@@ -362,6 +362,7 @@ export async function getAnalyticsData(filters: FilterState = {}) {
       matches: {
         where: {
           manuallyExcluded: false,
+          publication: { verifiedStatus: { not: 'EXCLUDED' } },
           ...(filters.sluOnly ? { includedInSluOutput: true } : {}),
         },
         include: {

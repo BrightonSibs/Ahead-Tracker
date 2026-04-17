@@ -58,7 +58,7 @@ export default function AdminDataQualityPage() {
                 { label: 'Missing SLU Start', value: quality?.counts?.missingSluStartCount ?? '-', href: '/admin/researchers' },
                 { label: 'Missing Journal Name', value: quality?.counts?.missingJournalNameCount ?? '-', href: '/publications' },
                 { label: 'Missing Abstract', value: quality?.counts?.missingAbstractCount ?? '-', href: '/publications' },
-                { label: 'Needs Review', value: quality?.counts?.needsReviewCount ?? '-', href: '/publications?verifiedStatus=NEEDS_REVIEW' },
+                { label: 'Needs Review', value: quality?.counts?.needsReviewCount ?? '-', href: '/admin/google-scholar-review' },
                 { label: 'Unresolved Impact Factor', value: quality?.counts?.unresolvedImpactFactorCount ?? '-', href: '/admin/journals' },
               ].map(item => (
                 <Link key={item.label} href={item.href}>

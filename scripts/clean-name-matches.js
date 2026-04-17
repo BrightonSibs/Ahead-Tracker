@@ -5,32 +5,106 @@ const applyChanges = process.argv.includes('--apply');
 
 function normalizeName(value) {
   return String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '');
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeName(value) {
+  const normalized = normalizeName(value);
+  if (!normalized) return [];
+  return normalized.split(' ').filter(Boolean);
+}
+
+function buildNameSignatures(value) {
+  const tokens = tokenizeName(value);
+  const signatures = new Set();
+
+  if (tokens.length === 0) {
+    return signatures;
+  }
+
+  signatures.add(`full:${tokens.join(' ')}`);
+
+  if (tokens.length < 2) {
+    return signatures;
+  }
+
+  const orientations = [
+    { given: tokens[0], surname: tokens[tokens.length - 1], middles: tokens.slice(1, -1) },
+    { given: tokens[tokens.length - 1], surname: tokens[0], middles: tokens.slice(1, -1) },
+  ];
+
+  for (const orientation of orientations) {
+    const initials = [orientation.given, ...orientation.middles].map(token => token[0]).join('');
+    signatures.add(`given-surname:${orientation.given}|${orientation.surname}`);
+    signatures.add(`given-initial-surname:${orientation.given[0]}|${orientation.surname}`);
+    signatures.add(`initials-surname:${initials}|${orientation.surname}`);
+  }
+
+  return signatures;
 }
 
 function buildAllowedNameMap(researchers) {
   return new Map(
-    researchers.map(researcher => [
-      researcher.id,
-      new Set(
-        [researcher.canonicalName, ...researcher.aliases.map(alias => alias.aliasName)]
-          .map(normalizeName)
-          .filter(Boolean)
-      ),
-    ])
+    researchers.map(researcher => {
+      const exactNames = new Set();
+      const canonicalSignatures = new Set();
+      const aliasSignatures = new Set();
+
+      for (const name of [researcher.canonicalName]) {
+        const normalized = normalizeName(name);
+        if (normalized) exactNames.add(normalized);
+        for (const signature of buildNameSignatures(name)) {
+          canonicalSignatures.add(signature);
+        }
+      }
+
+      for (const alias of researcher.aliases) {
+        const normalized = normalizeName(alias.aliasName);
+        if (normalized) exactNames.add(normalized);
+        for (const signature of buildNameSignatures(alias.aliasName)) {
+          aliasSignatures.add(signature);
+        }
+      }
+
+      return [
+        researcher.id,
+        {
+          exactNames,
+          canonicalSignatures,
+          aliasSignatures,
+        },
+      ];
+    })
   );
 }
 
 function matchAllowedAuthors(publicationAuthors, allowedNames) {
-  return publicationAuthors.some(author => allowedNames.has(normalizeName(author.authorName)));
+  for (const author of publicationAuthors) {
+    const normalizedAuthor = normalizeName(author.authorName);
+    if (!normalizedAuthor) continue;
+    if (allowedNames.exactNames.has(normalizedAuthor)) return true;
+
+    const signatures = buildNameSignatures(author.authorName);
+    for (const signature of signatures) {
+      if (allowedNames.canonicalSignatures.has(signature) || allowedNames.aliasSignatures.has(signature)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function classifyMatch(publicationAuthors, researcher) {
   const canonicalName = normalizeName(researcher.canonicalName);
-  const aliasNames = new Set(researcher.aliases.map(alias => normalizeName(alias.aliasName)));
+  const aliasNames = new Set(researcher.aliases.map(alias => normalizeName(alias.aliasName)).filter(Boolean));
+  const canonicalSignatures = new Set(buildNameSignatures(researcher.canonicalName));
+  const aliasSignatures = new Set(
+    researcher.aliases.flatMap(alias => Array.from(buildNameSignatures(alias.aliasName)))
+  );
 
   for (const author of publicationAuthors) {
     const normalizedAuthor = normalizeName(author.authorName);
@@ -42,6 +116,17 @@ function classifyMatch(publicationAuthors, researcher) {
 
     if (aliasNames.has(normalizedAuthor)) {
       return { matchType: 'ALIAS_MATCH', matchConfidence: 0.92 };
+    }
+
+    const authorSignatures = buildNameSignatures(author.authorName);
+    for (const signature of authorSignatures) {
+      if (canonicalSignatures.has(signature)) {
+        return { matchType: 'INITIALS_MATCH', matchConfidence: 0.88 };
+      }
+
+      if (aliasSignatures.has(signature)) {
+        return { matchType: 'INITIALS_MATCH', matchConfidence: 0.84 };
+      }
     }
   }
 

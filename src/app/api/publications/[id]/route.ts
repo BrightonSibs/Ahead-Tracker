@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { determineSluInclusion, extractSourceAffiliationEvidence } from '@/lib/affiliations';
 import { authOptions } from '@/lib/auth';
 import { getPublicationById } from '@/lib/services/publications';
+import { normalizeDoi } from '@/lib/doi';
+import { isNonResearchNoticeTitle } from '@/lib/publication-notices';
 import { prisma } from '@/lib/prisma';
 
 function normalizeTitle(value: string) {
@@ -26,6 +29,39 @@ function parseOptionalNumber(value: unknown, fieldName: string) {
     throw new Error(`Invalid ${fieldName}`);
   }
   return parsed;
+}
+
+async function computeResearcherSluInclusion(args: {
+  researcherId: string;
+  publicationId: string;
+  publicationDate: Date | null;
+  publicationYear: number | null;
+}) {
+  const { researcherId, publicationId, publicationDate, publicationYear } = args;
+  const [researcher, sourceRecords] = await Promise.all([
+    prisma.researcher.findUnique({
+      where: { id: researcherId },
+      include: {
+        aliases: { select: { aliasName: true } },
+        identifiers: { select: { identifierType: true, value: true } },
+      },
+    }),
+    prisma.sourceRecord.findMany({
+      where: { publicationId },
+      select: { source: true, rawData: true },
+    }),
+  ]);
+
+  if (!researcher) {
+    throw new Error('Researcher not found');
+  }
+
+  return determineSluInclusion({
+    researcher,
+    publicationDate,
+    publicationYear,
+    evidenceSources: extractSourceAffiliationEvidence(sourceRecords),
+  });
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -58,16 +94,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const publicationDate = parseOptionalDate(body.publicationDate);
     const publicationYear = parseOptionalNumber(body.publicationYear, 'publication year');
+    const normalizedDoi = body.doi !== undefined ? normalizeDoi(body.doi) : undefined;
+    const nextTitle = body.title !== undefined ? String(body.title) : prev.title;
+    const autoExcludedNotice = isNonResearchNoticeTitle(nextTitle);
 
     let updated = await prisma.publication.update({
       where: { id },
       data: {
         ...(body.title !== undefined ? { title: body.title, normalizedTitle: normalizeTitle(body.title) } : {}),
-        ...(body.doi !== undefined ? { doi: body.doi } : {}),
+        ...(body.doi !== undefined ? { doi: normalizedDoi } : {}),
         ...(body.journalName !== undefined ? { journalName: body.journalName } : {}),
         ...(publicationDate !== undefined ? { publicationDate } : {}),
         ...(publicationYear !== undefined ? { publicationYear } : {}),
-        ...(body.verifiedStatus !== undefined ? { verifiedStatus: body.verifiedStatus } : {}),
+        ...(body.verifiedStatus !== undefined
+          ? { verifiedStatus: body.verifiedStatus }
+          : autoExcludedNotice && prev.verifiedStatus !== 'EXCLUDED'
+            ? { verifiedStatus: 'EXCLUDED' }
+            : {}),
         ...(body.abstract !== undefined ? { abstract: body.abstract } : {}),
       },
     });
@@ -92,9 +135,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     if (body.restoreResearcherId) {
+      const sluInclusion = await computeResearcherSluInclusion({
+        researcherId: body.restoreResearcherId,
+        publicationId: id,
+        publicationDate: updated.publicationDate,
+        publicationYear: updated.publicationYear,
+      });
       await prisma.publicationResearcherMatch.updateMany({
         where: { publicationId: id, researcherId: body.restoreResearcherId },
-        data: { manuallyExcluded: false, exclusionReason: null, manuallyConfirmed: true },
+        data: {
+          manuallyExcluded: false,
+          exclusionReason: null,
+          manuallyConfirmed: true,
+          includedInSluOutput: sluInclusion.includedInSluOutput,
+          sluTenureNote: sluInclusion.reason,
+        },
       });
       await prisma.manualOverride.create({
         data: {
@@ -108,18 +163,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     if (body.addResearcherId) {
-      const researcher = await prisma.researcher.findUnique({
-        where: { id: body.addResearcherId },
-        select: { id: true, sluStartDate: true },
-      });
+      const researcher = await prisma.researcher.findUnique({ where: { id: body.addResearcherId }, select: { id: true } });
 
       if (!researcher) {
         return NextResponse.json({ error: 'Researcher not found' }, { status: 404 });
       }
 
-      const includedInSluOutput = !researcher.sluStartDate
-        || !updated.publicationDate
-        || updated.publicationDate >= researcher.sluStartDate;
+      const sluInclusion = await computeResearcherSluInclusion({
+        researcherId: researcher.id,
+        publicationId: id,
+        publicationDate: updated.publicationDate,
+        publicationYear: updated.publicationYear,
+      });
 
       await prisma.publicationResearcherMatch.upsert({
         where: {
@@ -134,7 +189,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           matchType: 'MANUAL_ASSIGNMENT',
           matchConfidence: 1.0,
           manuallyConfirmed: true,
-          includedInSluOutput,
+          includedInSluOutput: sluInclusion.includedInSluOutput,
+          sluTenureNote: sluInclusion.reason,
         },
         create: {
           publicationId: id,
@@ -143,7 +199,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           matchConfidence: 1.0,
           manuallyConfirmed: true,
           manuallyExcluded: false,
-          includedInSluOutput,
+          includedInSluOutput: sluInclusion.includedInSluOutput,
+          sluTenureNote: sluInclusion.reason,
         },
       });
 

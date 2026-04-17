@@ -256,7 +256,7 @@ export default function AdminSyncPage() {
                     <p className="text-sm font-semibold text-gray-900">{sourceLabel(src)}</p>
                     {src === 'GOOGLE_SCHOLAR' && (
                       <p className={`text-[10px] mt-0.5 ${configured ? 'text-green-600' : 'text-blue-600'}`}>
-                        {configured ? 'SERPAPI_KEY detected on server' : 'Requires SERPAPI_KEY in .env.local'}
+                        {configured ? 'Requires SERPAPI_KEY and a saved Scholar profile ID' : 'Requires SERPAPI_KEY in .env.local'}
                       </p>
                     )}
                     {src === 'OPENALEX' && (
@@ -400,7 +400,7 @@ export default function AdminSyncPage() {
               </p>
               <p>
                 <strong className="text-gray-800">Google Scholar</strong> - Automatic sync is supported through SerpAPI when{' '}
-                <code className="font-mono bg-gray-100 px-1 rounded">SERPAPI_KEY</code> is configured.
+                <code className="font-mono bg-gray-100 px-1 rounded">SERPAPI_KEY</code> is configured and the researcher has a saved Scholar profile ID.
               </p>
             </div>
           </div>

@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
     if (type === 'dashboard') {
       const matchWhere = {
         manuallyExcluded: false,
+        publication: { verifiedStatus: { not: 'EXCLUDED' } },
         ...(sluOnly ? { includedInSluOutput: true } : {}),
         ...(department ? { researcher: { department } } : {}),
       };
@@ -87,6 +88,15 @@ export async function GET(req: NextRequest) {
       const uniquePublicationIds = Array.from(new Set(publicationMatches.map(match => match.publicationId)));
       const pubCount = uniquePublicationIds.length;
       const thisYear = new Date().getFullYear();
+      const publicationStatusCounts = uniquePublicationIds.length > 0
+        ? await prisma.publication.groupBy({
+            by: ['verifiedStatus'],
+            where: { id: { in: uniquePublicationIds } },
+            _count: { _all: true },
+          })
+        : [];
+      const verifiedPublications = publicationStatusCounts.find(item => item.verifiedStatus === 'VERIFIED')?._count._all ?? 0;
+      const reviewPublications = publicationStatusCounts.find(item => item.verifiedStatus === 'NEEDS_REVIEW')?._count._all ?? 0;
 
       const citationHistory = uniquePublicationIds.length > 0
         ? await prisma.citation.findMany({
@@ -164,6 +174,8 @@ export async function GET(req: NextRequest) {
         totalCitations,
         avgCitationsPerArticle: Number(avgCit),
         citationsThisYear,
+        verifiedPublications,
+        reviewPublications,
         publicationsWithCitationData,
         publicationsWithoutCitationData,
         alerts: alerts.map(alert => ({ ...alert, createdAt: alert.createdAt.toISOString() })),

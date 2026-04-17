@@ -128,6 +128,35 @@ export default function AdminPage() {
     DUPLICATE_DETECTED: 'D',
   };
 
+  function getAlertHref(alert: any) {
+    if (!alert?.entityId) return null;
+
+    if (alert.entityType === 'publication') return `/publications/${alert.entityId}`;
+    if (alert.entityType === 'researcher') return `/researchers/${alert.entityId}`;
+    if (alert.entityType === 'journalMetric') return '/admin/journals';
+
+    return null;
+  }
+
+  async function markAlertDone(alertId: string) {
+    const response = await fetch(`/api/admin/alerts/${alertId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resolved: true }),
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    setAlerts(currentAlerts => currentAlerts.map(alert => (
+      alert.id === alertId
+        ? { ...alert, resolved: true, resolvedAt: new Date().toISOString() }
+        : alert
+    )));
+    invalidateJsonCache('/api/analytics');
+  }
+
   return (
     <PageLayout>
       <TopBar title="Administration" subtitle="System management, data quality, and sync controls" />
@@ -175,26 +204,43 @@ export default function AdminPage() {
                 <p className="py-4 text-center text-sm text-gray-400">No active alerts</p>
               ) : (
                 <div className="space-y-3">
-                  {alerts.map(alert => (
-                    <div
-                      key={alert.id}
-                      className={`flex items-start gap-3 rounded-lg border p-3 ${
-                        alert.resolved ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-amber-200 bg-amber-50'
-                      }`}
-                    >
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-semibold text-gray-600">
-                        {alertTypeIcon[alert.alertType] || '!'}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-gray-800">{alert.title}</p>
-                        <p className="mt-0.5 text-xs leading-relaxed text-gray-600">{alert.message}</p>
-                        <p className="mt-1 text-[10px] text-gray-400">{formatDate(alert.createdAt)}</p>
+                  {alerts.map(alert => {
+                    const href = getAlertHref(alert);
+
+                    return (
+                      <div
+                        key={alert.id}
+                        className={`flex items-start gap-3 rounded-lg border p-3 ${
+                          alert.resolved ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-amber-200 bg-amber-50'
+                        }`}
+                      >
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-semibold text-gray-600">
+                          {alertTypeIcon[alert.alertType] || '!'}
+                        </span>
+                        {href ? (
+                          <Link href={href} className="min-w-0 flex-1 rounded-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+                            <p className="text-xs font-semibold text-gray-800 hover:text-brand-700">{alert.title}</p>
+                            <p className="mt-0.5 text-xs leading-relaxed text-gray-600 hover:text-gray-700">{alert.message}</p>
+                            <p className="mt-1 text-[10px] text-gray-400">{formatDate(alert.createdAt)}</p>
+                          </Link>
+                        ) : (
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-gray-800">{alert.title}</p>
+                            <p className="mt-0.5 text-xs leading-relaxed text-gray-600">{alert.message}</p>
+                            <p className="mt-1 text-[10px] text-gray-400">{formatDate(alert.createdAt)}</p>
+                          </div>
+                        )}
+                        {!alert.resolved && isAdmin && (
+                          <button
+                            className="mt-0.5 flex-shrink-0 text-xs text-gray-400 hover:text-green-600"
+                            onClick={() => markAlertDone(alert.id)}
+                          >
+                            Mark done
+                          </button>
+                        )}
                       </div>
-                      {!alert.resolved && isAdmin && (
-                        <button className="mt-0.5 flex-shrink-0 text-xs text-gray-400 hover:text-green-600">Mark done</button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -294,7 +340,7 @@ export default function AdminPage() {
                   { label: 'Missing SLU Start', value: quality?.counts?.missingSluStartCount ?? '-', href: '/admin/researchers' },
                   { label: 'Missing Journal', value: quality?.counts?.missingJournalNameCount ?? '-', href: '/publications' },
                   { label: 'Missing Abstract', value: quality?.counts?.missingAbstractCount ?? '-', href: '/publications' },
-                  { label: 'Needs Review', value: quality?.counts?.needsReviewCount ?? '-', href: '/publications?verifiedStatus=NEEDS_REVIEW' },
+                  { label: 'Needs Review', value: quality?.counts?.needsReviewCount ?? '-', href: '/admin/google-scholar-review' },
                   { label: 'Unknown IF', value: quality?.counts?.unresolvedImpactFactorCount ?? '-', href: '/admin/journals' },
                 ].map(item => (
                   <Link key={item.label} href={item.href} className="rounded-lg bg-gray-50 p-3 transition-colors hover:bg-brand-50">
@@ -374,7 +420,7 @@ export default function AdminPage() {
                   { href: '/admin/researchers', label: 'Add new researcher', external: false },
                   { href: '/admin/data-quality', label: 'Open data quality review', external: false },
                   { href: '/admin/departments', label: 'Manage departments', external: false },
-                  { href: '/publications?verifiedStatus=NEEDS_REVIEW', label: 'Review flagged publications', external: false },
+                  { href: '/admin/google-scholar-review', label: 'Review Scholar publications', external: false },
                 ].map(action =>
                   action.external ? (
                     <a

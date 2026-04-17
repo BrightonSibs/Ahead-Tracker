@@ -71,6 +71,7 @@ export async function getAllResearchers(filters?: {
         where: {
           researcherId: { in: researcherIds },
           manuallyExcluded: false,
+          publication: { verifiedStatus: { not: 'EXCLUDED' } },
         },
         select: {
           researcherId: true,
@@ -139,6 +140,7 @@ export async function getResearchersSummary(filters?: {
     prisma.publicationResearcherMatch.findMany({
       where: {
         manuallyExcluded: false,
+        publication: { verifiedStatus: { not: 'EXCLUDED' } },
         ...(filters?.sluOnly ? { includedInSluOutput: true } : {}),
         researcher: researcherWhere,
       },
@@ -187,6 +189,7 @@ export async function getResearcherById(id: string, sluOnly = false) {
       matches: {
         where: {
           manuallyExcluded: false,
+          publication: { verifiedStatus: { not: 'EXCLUDED' } },
           ...(sluOnly ? { includedInSluOutput: true } : {}),
         },
         include: {
@@ -247,6 +250,7 @@ export async function getResearcherById(id: string, sluOnly = false) {
         where: {
           publicationId: { in: publicationIds },
           manuallyExcluded: false,
+          publication: { verifiedStatus: { not: 'EXCLUDED' } },
           researcherId: { not: id },
         },
         include: {
@@ -355,6 +359,7 @@ export async function getCollaborationNetwork(department?: string) {
         where: {
           researcherId: { in: researcherIds },
           manuallyExcluded: false,
+          publication: { verifiedStatus: { not: 'EXCLUDED' } },
         },
         select: {
           researcherId: true,

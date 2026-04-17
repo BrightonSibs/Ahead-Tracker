@@ -109,8 +109,8 @@ export async function GET() {
   ] = await Promise.all([
     prisma.researcher.count({ where: { activeStatus: true, orcid: null } }),
     prisma.researcher.count({ where: { activeStatus: true, sluStartDate: null } }),
-    prisma.publication.count({ where: { journalName: null } }),
-    prisma.publication.count({ where: { abstract: null } }),
+    prisma.publication.count({ where: { verifiedStatus: { not: 'EXCLUDED' }, journalName: null } }),
+    prisma.publication.count({ where: { verifiedStatus: { not: 'EXCLUDED' }, abstract: null } }),
     prisma.publication.count({ where: { verifiedStatus: 'NEEDS_REVIEW' } }),
     prisma.researcher.findMany({
       where: {
@@ -132,6 +132,7 @@ export async function GET() {
     }),
     prisma.publication.findMany({
       where: {
+        verifiedStatus: { not: 'EXCLUDED' },
         OR: [
           { journalName: null },
           { abstract: null },

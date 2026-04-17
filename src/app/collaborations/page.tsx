@@ -474,7 +474,7 @@ export default function CollaborationsPage() {
 
   return (
     <PageLayout>
-      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph across departments; citation values use latest stored snapshots" />
+      <TopBar title="Co-authorship Network" subtitle="Publication collaboration graph across departments; counts include verified and review-stage matched publications, and citation values use latest stored snapshots" />
       <PageContent>
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
           <div className="space-y-4 lg:col-span-3">

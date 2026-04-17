@@ -41,7 +41,7 @@ export async function GET() {
       GOOGLE_SCHOLAR: {
         configured: Boolean(process.env.SERPAPI_KEY),
         reason: process.env.SERPAPI_KEY
-          ? 'SERPAPI_KEY is loaded and Google Scholar sync is ready.'
+          ? 'SERPAPI_KEY is loaded. Google Scholar sync now only imports researchers with a saved Scholar profile ID.'
           : 'Add SERPAPI_KEY to .env.local and restart the dev server to enable Scholar sync.',
       },
     },

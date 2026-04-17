@@ -16,7 +16,7 @@ export default function DashboardPage() {
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(true);
   const [sluOnly, setSluOnly] = useState(false);
-  const [citationView, setCitationView] = useState<'growth' | 'cumulative'>('growth');
+  const [citationView, setCitationView] = useState<'growth' | 'cumulative'>('cumulative');
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +58,16 @@ export default function DashboardPage() {
   }, [sluOnly]);
 
   const activeChartData = citationView === 'cumulative' ? cumulativeChartData : growthChartData;
+  const currentYear = new Date().getFullYear();
+  const growthHasObservedActivity = growthChartData.some(item =>
+    departmentKeys.some(key => Number(item?.[key.key] ?? 0) > 0),
+  );
+  const cumulativeHasObservedCitations = cumulativeChartData.some(item =>
+    departmentKeys.some(key => Number(item?.[key.key] ?? 0) > 0),
+  );
+  const citationDeltaLabel = (stats?.citationsThisYear ?? 0) > 0
+    ? `${(stats?.citationsThisYear ?? 0).toLocaleString()} observed growth in ${currentYear} so far`
+    : `No observed growth in ${currentYear} yet; follow-up citation recaptures will populate trend lines`;
 
   return (
     <PageLayout>
@@ -116,7 +126,7 @@ export default function DashboardPage() {
                   sub="Latest stored totals across publications with citation snapshots"
                   color="teal"
                   icon="C"
-                  delta={`${(stats?.citationsThisYear ?? 0).toLocaleString()} observed growth in ${new Date().getFullYear()} so far`}
+                  delta={citationDeltaLabel}
                 />
                 <KpiCard
                   label="Avg Captured Citations"
@@ -144,18 +154,36 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {!summaryLoading && ((stats?.reviewPublications ?? 0) > 0 || (stats?.verifiedPublications ?? 0) > 0) && (
+            <div className="text-sm text-gray-600">
+              Dashboard totals currently include {stats?.verifiedPublications?.toLocaleString() || 0} verified publications
+              {` `}
+              and {stats?.reviewPublications?.toLocaleString() || 0} review-stage publications, including Google Scholar imports from verified profile IDs.
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader>
                 <div>
                   <CardTitle>
-                    {citationView === 'cumulative' ? 'Department Cumulative Citations' : 'Department Citation Trends'}
+                    {citationView === 'cumulative' ? 'Department Citation Totals' : 'Department Citation Trends'}
                   </CardTitle>
                   <p className="mt-0.5 text-xs text-gray-500">
                     {citationView === 'cumulative'
                       ? `Latest observed citation totals carried forward by year ${sluOnly ? '(SLU tenure only)' : '(all time)'}`
                       : `Observed citation growth from stored snapshots ${sluOnly ? '(SLU tenure only)' : '(all time)'}`}
                   </p>
+                  {!detailLoading && citationView === 'growth' && !growthHasObservedActivity && cumulativeHasObservedCitations && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      Growth is flat because the rebuild mostly created first citation snapshots. Use Cumulative to view the current captured totals while follow-up syncs rebuild trend history.
+                    </p>
+                  )}
+                  {!detailLoading && citationView === 'cumulative' && !cumulativeHasObservedCitations && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      No captured citation totals are available yet for the current filter.
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <Button

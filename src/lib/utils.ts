@@ -101,6 +101,7 @@ export function matchTypeLabel(matchType: string): string {
     EXACT_NAME_MATCH: 'Canonical name',
     ALIAS_MATCH: 'Approved alias',
     INITIALS_MATCH: 'Initials / reordered',
+    GOOGLE_SCHOLAR_PROFILE_MATCH: 'Scholar profile',
     TRUSTED_SOURCE_ENRICHMENT: 'Trusted source',
     MANUAL_ASSIGNMENT: 'Manual',
   };
@@ -114,6 +115,7 @@ export function matchTypeBadgeColor(matchType: string): string {
     EXACT_NAME_MATCH: 'border border-brand-200 bg-brand-50 text-brand-800',
     ALIAS_MATCH: 'border border-gray-300 bg-white text-gray-800',
     INITIALS_MATCH: 'border border-slate-300 bg-slate-50 text-slate-700',
+    GOOGLE_SCHOLAR_PROFILE_MATCH: 'border border-blue-200 bg-blue-50 text-blue-700',
     TRUSTED_SOURCE_ENRICHMENT: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
     MANUAL_ASSIGNMENT: 'border border-amber-200 bg-amber-50 text-amber-700',
   };

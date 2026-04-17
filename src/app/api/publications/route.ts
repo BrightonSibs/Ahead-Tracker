@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getPublications } from '@/lib/services/publications';
+import { normalizeDoi } from '@/lib/doi';
+import { isNonResearchNoticeTitle } from '@/lib/publication-notices';
 import type { FilterState } from '@/types';
 
 function normalizeTitle(value: string) {
@@ -51,6 +53,7 @@ export async function POST(req: NextRequest) {
   const { prisma } = await import('@/lib/prisma');
 
   try {
+    const normalizedDoi = normalizeDoi(body.doi);
     let parsedCitationCount: number | null = null;
     if (body.citationCount !== undefined && body.citationCount !== null && body.citationCount !== '') {
       parsedCitationCount = Number(body.citationCount);
@@ -63,13 +66,13 @@ export async function POST(req: NextRequest) {
       data: {
         title: body.title,
         normalizedTitle: normalizeTitle(body.title),
-        doi: body.doi || null,
+        doi: normalizedDoi,
         publicationDate: body.publicationDate ? new Date(body.publicationDate) : null,
         publicationYear: body.publicationYear ? Number(body.publicationYear) : null,
         journalName: body.journalName || null,
         abstract: body.abstract || null,
         sourcePrimary: body.sourcePrimary || 'MANUAL',
-        verifiedStatus: 'UNVERIFIED',
+        verifiedStatus: isNonResearchNoticeTitle(body.title) ? 'EXCLUDED' : 'UNVERIFIED',
       },
     });
 

@@ -23,6 +23,7 @@ const VERIFIED_OPTIONS = [
   { value: 'VERIFIED', label: 'Verified' },
   { value: 'UNVERIFIED', label: 'Unverified' },
   { value: 'NEEDS_REVIEW', label: 'Needs Review' },
+  { value: 'EXCLUDED', label: 'Excluded' },
 ];
 
 export default function PublicationsPage() {

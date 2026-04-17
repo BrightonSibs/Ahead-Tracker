@@ -39,6 +39,7 @@ function parseFilters(searchParams: URLSearchParams): ExportFilters {
 
 function buildPublicationWhere(filters: ExportFilters) {
   return {
+    verifiedStatus: { not: 'EXCLUDED' },
     ...(filters.yearFrom || filters.yearTo
       ? {
           publicationYear: {
@@ -103,6 +104,7 @@ async function getResearcherExportData(filters: ExportFilters) {
           manuallyExcluded: false,
           ...(filters.sluOnly ? { includedInSluOutput: true } : {}),
           publication: {
+            verifiedStatus: { not: 'EXCLUDED' },
             ...(filters.yearFrom || filters.yearTo
               ? {
                   publicationYear: {

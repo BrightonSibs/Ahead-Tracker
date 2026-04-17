@@ -18,6 +18,7 @@
     "db:seed": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:migrate": "prisma migrate dev",
+    "db:rebuild-publications": "node scripts/rebuild-publications.js",
     "db:dedupe-publications:check": "node scripts/dedupe-publications.js",
     "db:dedupe-publications": "node scripts/dedupe-publications.js --apply",
     "db:clean-name-matches:check": "node scripts/clean-name-matches.js",
@@ -28,6 +29,11 @@
     "db:repair-journal-names": "node scripts/repair-journal-names.js --apply",
     "db:recompute-publication-statuses:check": "node scripts/recompute-publication-statuses.js",
     "db:recompute-publication-statuses": "node scripts/recompute-publication-statuses.js --apply",
+    "db:enrich-scholar-review-links": "node scripts/enrich-scholar-review-links.js",
+    "db:exclude-non-research-notices:check": "node scripts/exclude-non-research-notices.js",
+    "db:exclude-non-research-notices": "node scripts/exclude-non-research-notices.js --apply",
+    "db:recompute-slu-affiliations:check": "node scripts/recompute-slu-affiliations.js",
+    "db:recompute-slu-affiliations": "node scripts/recompute-slu-affiliations.js --apply",
     "postinstall": "prisma generate"
   },
   "dependencies": {
